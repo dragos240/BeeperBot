@@ -1,7 +1,9 @@
 from pathlib import Path
-from typing import Dict, Optional
+from time import sleep
+from typing import Dict, List, Optional
 import logging as log
 import asyncio
+from threading import Thread
 
 import gradio as gr
 
@@ -56,6 +58,7 @@ class Layout:
                         value="Start")
                     self.bot_stop = gr.Button(
                         value="Stop")
+                    self.bot_stop.interactive = False
 
             with self.tab_config:
                 with gr.Row():
@@ -76,6 +79,50 @@ class Layout:
                 ui.launch()
 
 
+class Worker:
+    thread: Optional[Thread]
+    discord_bot: DiscordBot
+    token: str
+    do_stop: bool
+
+    def __init__(self,
+                 discord_bot: DiscordBot,
+                 token: str):
+        self.thread = None
+        self.discord_bot = discord_bot
+        self.token = token
+        self.do_stop = False
+
+    def is_running(self):
+        return self.thread is not None \
+            and self.thread.is_alive()
+
+    async def start_bot(self):
+        await self.discord_bot.start()
+        await self.discord_bot.wait_until_ready()
+
+        while True:
+            if self.do_stop:
+                await self.discord_bot.close()
+                await asyncio.sleep(1)
+
+    def start_coroutine(self):
+        asyncio.run(self.start_bot)
+
+    def start(self):
+        if not self.is_running():
+            self.thread = Thread(target=self.start_coroutine)
+            self.thread.start()
+
+    def stop(self):
+        if self.is_running():
+            self.do_stop = True
+
+        while not self.discord_bot.is_closed():
+            log.debug("Waiting until closed")
+            sleep(1)
+
+
 class Controller:
     """Controller for the UI elements
 
@@ -85,47 +132,85 @@ class Controller:
     """
     layout: Layout
     character: str
-    discord_bot: Optional[DiscordBot]
+    discord_bot: DiscordBot
+    worker: Optional[Worker]
 
     def __init__(self, layout: Layout):
         self.layout = layout
         self.character = ""
-        self.discord_bot = None
+        self.discord_bot = DiscordBot({"character": self.character})
+        self.worker = None
 
-        layout.bot_start.click(self.handle_start)
-        layout.bot_stop.click(self.handle_stop)
+        layout.bot_start.click(self.handle_start,
+                               outputs=[
+                                   layout.bot_stop,
+                                   layout.bot_start
+                               ])
+        layout.bot_stop.click(self.handle_stop,
+                              outputs=[
+                                  layout.bot_start,
+                                  layout.bot_stop
+                              ])
 
         layout.discord_token_textbox.value = self.load_token_value()
         layout.discord_token_textbox.change(
             self.on_token_change,
             inputs=layout.discord_token_textbox)
+
         layout.discord_token_save.click(self.handle_save_token)
+
         layout.character_dropdown.choices = self.load_character_choices()
         layout.character_dropdown.select(
             self.handle_character_select,
             inputs=layout.character_dropdown)
 
+    def start_worker(self):
+        """Creates a worker and starts it"""
+        token = self.load_token_value()
+        if token and self.worker is None:
+            self.worker = Worker(self.discord_bot, token)
+            self.worker.start()
+
     def on_token_change(self, token: str):
-        self.layout.discord_token_textbox.value = token
-        self.layout.discord_token_textbox.update()
+        self.layout.discord_token_textbox.update(value=token)
 
-    def handle_start(self):
-        async def start():
-            if self.discord_bot is not None:
-                await self.discord_bot.close()
-            self.discord_bot = DiscordBot({"character": self.character})
-
-            await self.discord_bot.start(self.load_token_value())
-
-        asyncio.run(start())
-
-    def handle_stop(self):
-        async def stop():
-            if self.discord_bot is None:
-                return
+    async def start_bot_internal(self):
+        """Starts the discord bot, should be called from a thread"""
+        if self.discord_bot is not None:
             await self.discord_bot.close()
 
-        asyncio.run(stop())
+        await self.discord_bot.start(self.load_token_value())
+
+    async def stop_bot_internal(self):
+        """Stops the discord bot, should be called from a thread"""
+        if self.discord_bot is None:
+            return
+        await self.discord_bot.close()
+
+    def handle_start(self) -> List[Dict]:
+        """Is called when the start button is clicked
+
+        Returns:
+            List[Dict]: A list of UI elements to update
+        """
+        print("handle_start clicked")
+        self.start_worker()
+
+        return [self.layout.bot_stop.update(interactive=True),
+                self.layout.bot_start.update(interactive=False)]
+
+    def handle_stop(self):
+        """Is called when the stop button is clicked
+
+        Returns:
+            List[Dict]: A list of UI elements to update
+        """
+        print("handle_stop clicked")
+        if self.worker is not None:
+            self.worker.stop()
+
+        return [self.layout.bot_start.update(interactive=True),
+                self.layout.bot_stop.update(interactive=False)]
 
     def load_token_value(self):
         try:
@@ -166,4 +251,6 @@ class Controller:
             self.character = character
 
         if self.character:
+            log.info("Loaded %s successfully!", character)
+            log.info("Loaded %s successfully!", character)
             log.info("Loaded %s successfully!", character)

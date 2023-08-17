@@ -35,6 +35,7 @@ def ui(launch: bool = False):
         return
 
     layout = Layout()
+
     layout.layout_ui(launch)
 
 
