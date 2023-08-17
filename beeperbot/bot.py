@@ -1,6 +1,7 @@
 import logging as log
 from typing import Dict, List
 from pprint import pformat
+import json
 
 import requests
 import discord
@@ -14,9 +15,20 @@ class DiscordBot(discord.Client):
 
     character: str
     channels: List
+    history: Dict
 
     def __init__(self, config: Dict):
         self.character = config["character"]
+        self.history = {"internal": [], "visible": []}
+
+        super().__init__(intents=self.get_intents())
+
+    @staticmethod
+    def get_intents() -> discord.Intents:
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        return intents
 
     async def on_ready(self):
         self.channels = list(self.get_all_channels())
@@ -26,19 +38,30 @@ class DiscordBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.channel.name != "bot-testing":
             return
+        if (self.user is not None
+                and message.author.id == self.user.id) \
+                or message.clean_content.startswith("//"):
+            return
         try:
             async with message.channel.typing():
-                self.handle_response(message)
+                await self.handle_response(message)
         except discord.DiscordException as e:
             log.error("Exception while processing message: %s",
                       message.clean_content,
                       exc_info=e)
 
-    def handle_response(self, message: discord.Message):
+    async def handle_response(self, message: discord.Message):
         request = self.create_request(message)
-        self.poll_api(request)
+        response = self.poll_api(request)
 
-    def create_request(self, message: discord.Message):
+        bot_reply = ""
+        if "internal" in response:
+            bot_reply = response["internal"][-1][-1]
+            await message.channel.send(bot_reply)
+            self.history = response
+
+    def create_request(self,
+                       message: discord.Message):
         user_input = message.clean_content
 
         request = {
@@ -46,7 +69,7 @@ class DiscordBot(discord.Client):
             # 'max_new_tokens': 250,
             # 'auto_max_new_tokens': False,
             # Need to actually set this somehow
-            'history': {"internal": [], "visible": []},
+            'history': self.history,
             'mode': 'chat',
             'character': self.character,
             'your_name': 'You',
@@ -102,8 +125,9 @@ class DiscordBot(discord.Client):
 
             return {}
 
-        result = response.json()
+        result: Dict = \
+            response.json()['results'][0]['history']
 
-        log.info(f"result: {pformat('result')}")
+        log.info(f"result: {json.dumps(result, indent=2)}")
 
         return result

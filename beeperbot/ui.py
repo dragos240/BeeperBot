@@ -98,29 +98,33 @@ class Worker:
             and self.thread.is_alive()
 
     async def start_bot(self):
-        await self.discord_bot.start()
+        if self.discord_bot.is_closed():
+            self.discord_bot = DiscordBot({"character": "None"})
+        await self.discord_bot.start(self.token)
         await self.discord_bot.wait_until_ready()
 
-        while True:
-            if self.do_stop:
-                await self.discord_bot.close()
-                await asyncio.sleep(1)
-
     def start_coroutine(self):
-        asyncio.run(self.start_bot)
+        asyncio.run(self.start_bot())
 
     def start(self):
         if not self.is_running():
+            log.info("Bot not running, attempting to start")
+            if self.discord_bot.loop is None:
+                print("Bot loop is None, creating new one")
+                self.discord_bot.loop = asyncio.new_event_loop()
             self.thread = Thread(target=self.start_coroutine)
             self.thread.start()
 
     def stop(self):
+        loop = self.discord_bot.loop
         if self.is_running():
-            self.do_stop = True
+            asyncio.run_coroutine_threadsafe(self.discord_bot.close(), loop)
 
-        while not self.discord_bot.is_closed():
-            log.debug("Waiting until closed")
-            sleep(1)
+            while not self.discord_bot.is_closed():
+                log.debug("Waiting until closed")
+                sleep(1)
+
+        log.info("Discord connection closed")
 
 
 class Controller:
@@ -131,14 +135,12 @@ class Controller:
         character: A Dict containing character data
     """
     layout: Layout
-    character: str
     discord_bot: DiscordBot
     worker: Optional[Worker]
 
     def __init__(self, layout: Layout):
         self.layout = layout
-        self.character = ""
-        self.discord_bot = DiscordBot({"character": self.character})
+        self.discord_bot = DiscordBot({"character": "None"})
         self.worker = None
 
         layout.bot_start.click(self.handle_start,
@@ -170,22 +172,20 @@ class Controller:
         if token and self.worker is None:
             self.worker = Worker(self.discord_bot, token)
             self.worker.start()
+        elif self.worker is not None \
+                and self.worker.discord_bot.is_closed():
+            self.worker.start()
+        else:
+            log.info("Oops! This is awkward...")
+            if self.worker is None:
+                log.info("Worker is None")
+            else:
+                log.info("Worker is not None")
+                if self.worker.discord_bot.is_closed():
+                    log.info("Bot is closed")
 
     def on_token_change(self, token: str):
         self.layout.discord_token_textbox.update(value=token)
-
-    async def start_bot_internal(self):
-        """Starts the discord bot, should be called from a thread"""
-        if self.discord_bot is not None:
-            await self.discord_bot.close()
-
-        await self.discord_bot.start(self.load_token_value())
-
-    async def stop_bot_internal(self):
-        """Stops the discord bot, should be called from a thread"""
-        if self.discord_bot is None:
-            return
-        await self.discord_bot.close()
 
     def handle_start(self) -> List[Dict]:
         """Is called when the start button is clicked
@@ -243,14 +243,12 @@ class Controller:
         log.info("Selected character: %s", character)
 
         if character == "None":
-            self.character = "None"
+            self.discord_bot.character = "None"
             return
 
         char_path = Path(f"characters/{character}.yaml")
         if char_path.exists():
-            self.character = character
+            self.discord_bot.character = character
 
-        if self.character:
-            log.info("Loaded %s successfully!", character)
-            log.info("Loaded %s successfully!", character)
+        if self.discord_bot.character:
             log.info("Loaded %s successfully!", character)
