@@ -1,7 +1,7 @@
+import asyncio
 import logging as log
-from typing import Dict, List
-from pprint import pformat
-import json
+from pprint import pformat, pprint
+from typing import Any, Dict, List
 
 import requests
 import discord
@@ -14,12 +14,15 @@ class DiscordBot(discord.Client):
     """Discord bot the UI uses"""
 
     character: str
-    channels: List
     history: Dict
+    active_channels: List[discord.TextChannel]
+    params: Dict[str, Any]
 
     def __init__(self, config: Dict):
         self.character = config["character"]
         self.history = {"internal": [], "visible": []}
+        self.active_channels = []
+        self.params = config["params"]
 
         super().__init__(intents=self.get_intents())
 
@@ -31,17 +34,78 @@ class DiscordBot(discord.Client):
         return intents
 
     async def on_ready(self):
-        self.channels = list(self.get_all_channels())
-
         log.info("Connected to discord!")
+
+    def get_bot_names(self, channel: discord.TextChannel):
+        names = [self.character.lower()]
+        if self.user is not None:
+            names.append(self.user.display_name.lower())
+            for channel in self.active_channels:
+                for member in channel.members:
+                    if member.id == self.get_id():
+                        names.append(member.nick)
+                        break
+
+        return names
+
+    def get_name_with_message(self, message: discord.Message):
+        names = self.get_bot_names(message)
+        result = self.character
+
+        for name in names:
+            if name in message.clean_content.lower():
+                result = name
+
+        return result
+
+    def is_name_in_message(self, message: discord.Message) -> bool:
+        names = self.get_bot_names(message)
+
+        for name in names:
+            if name in message.clean_content.lower():
+                return True
+
+        return False
+
+    def get_id(self) -> int:
+        if self.user is not None:
+            return self.user.id
+
+        return -1
+
+    async def update_character_async(self, name: str):
+        self.character = name
+        if self.character == "None":
+            return
+        for channel in self.active_channels:
+            members = channel.guild.members
+            for member in members:
+                if member.id == self.get_id():
+                    if member.nick != name:
+                        await member.edit(nick=name)
+
+    def update_character(self, name: str):
+        asyncio.run_coroutine_threadsafe(
+            self.update_character_async(name),
+            self.loop)
 
     async def on_message(self, message: discord.Message):
         if message.channel.name != "bot-testing":
             return
+        if message.channel not in self.active_channels \
+                and self.is_name_in_message(message):
+            self.active_channels.append(message.channel)
+            log.info("I was pinged in %s. I can now talk there!",
+                     message.channel.name)
         if (self.user is not None
                 and message.author.id == self.user.id) \
-                or message.clean_content.startswith("//"):
+                or message.clean_content.startswith("//") \
+                or message.channel not in self.active_channels:
             return
+
+        # Update nicks
+        await self.update_character_async(self.character)
+
         try:
             async with message.channel.typing():
                 await self.handle_response(message)
@@ -54,27 +118,37 @@ class DiscordBot(discord.Client):
         request = self.create_request(message)
         response = self.poll_api(request)
 
+        log.info("Params: %s", pformat(self.params))
+
         bot_reply = ""
         if "internal" in response:
             bot_reply = response["internal"][-1][-1]
-            await message.channel.send(bot_reply)
+            await message.reply(bot_reply, mention_author=False)
             self.history = response
 
     def create_request(self,
                        message: discord.Message):
-        user_input = message.clean_content
+        user_input = "{} says \"{}\"".format(
+            message.author.display_name, message.clean_content)
+        bot_name = self.get_name_with_message(message)
 
-        request = {
+        request = self.params.copy()
+
+        # It's possible some values accidentally resolve to None
+        for k, v in request.items():
+            if v is None:
+                request[k] = 0.0
+
+        request.update({
             'user_input': user_input,
             # 'max_new_tokens': 250,
             # 'auto_max_new_tokens': False,
-            # Need to actually set this somehow
             'history': self.history,
             'mode': 'chat',
             'character': self.character,
-            'your_name': 'You',
-            'name1': message.author.display_name,
-            # 'name2': 'name of character', # Optional
+            'your_name': "You",
+            # 'name1': message.author.display_name,
+            'name2': bot_name,
             # 'context': 'character context', # Optional
             # 'greeting': 'greeting', # Optional
             # 'name1_instruct': 'You', # Optional
@@ -84,17 +158,17 @@ class DiscordBot(discord.Client):
             'regenerate': False,
             '_continue': False,
             # 'preset': 'None',
-            # 'do_sample': True,
-            # 'temperature': 0.7,
-            # 'top_p': 0.1,
+            'do_sample': True,
+            # 'temperature': self.params["temperature"],
+            # 'top_p': self.params["top_p"],
             # 'typical_p': 1,
             # 'epsilon_cutoff': 0,  # In units of 1e-4
             # 'eta_cutoff': 0,  # In units of 1e-4
             # 'tfs': 1,
             # 'top_a': 0,
-            # 'repetition_penalty': 1.18,
+            # 'repetition_penalty': self.params["repetition_penalty"],
             # 'repetition_penalty_range': 0,
-            # 'top_k': 40,
+            # 'top_k': self.params["top_k"],
             # 'min_length': 0,
             # 'no_repeat_ngram_size': 0,
             # 'num_beams': 1,
@@ -113,7 +187,7 @@ class DiscordBot(discord.Client):
             'ban_eos_token': False,
             'skip_special_tokens': True,
             'stopping_strings': []
-        }
+        })
 
         return request
 
@@ -127,7 +201,5 @@ class DiscordBot(discord.Client):
 
         result: Dict = \
             response.json()['results'][0]['history']
-
-        log.info(f"result: {json.dumps(result, indent=2)}")
 
         return result
