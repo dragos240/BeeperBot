@@ -2,6 +2,7 @@ import asyncio
 import logging as log
 from pprint import pformat, pprint
 from typing import Any, Dict, List
+from discord.app_commands import CommandTree
 
 import requests
 import discord
@@ -18,6 +19,7 @@ class DiscordBot(discord.Client):
     do_greeting: bool
     active_channels: List[discord.TextChannel]
     params: Dict[str, Any]
+    tree: CommandTree
 
     def __init__(self, config: Dict):
         self.character = config["character"]
@@ -27,6 +29,31 @@ class DiscordBot(discord.Client):
         self.params = config["params"]
 
         super().__init__(intents=self.get_intents())
+        self.tree = CommandTree(self)
+
+    async def setup_hook(self):
+        for guild in self.guilds:
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+
+    async def set_up_commands(self):
+        command_funcs = [
+            {"name": "repeat",
+             "func": self.repeat,
+             "description": "Repeat a string"},
+            {"name": "reset",
+             "func": self.reset,
+             "description": "Make me forget everything"}
+        ]
+
+        for command_func in command_funcs:
+            command = discord.app_commands.Command(
+                name=command_func.get("name", command_func["func"].__name__),
+                callback=command_func["func"],
+                description=command_func["description"])
+
+            self.tree.add_command(command)
+        await self.tree.sync()
 
     @staticmethod
     def get_intents() -> discord.Intents:
@@ -35,8 +62,23 @@ class DiscordBot(discord.Client):
         intents.members = True
         return intents
 
+    @discord.app_commands.describe(
+        message="Message to repeat"
+    )
+    async def repeat(self, interaction: discord.Interaction, message: str):
+        await interaction.response.send_message(message)
+
+    async def reset(self, interaction: discord.Interaction):
+        self.history = {"internal": [], "visible": []}
+        request = self.create_request("Say hi~", "Chat")
+        bot_reply = self.get_bot_reply(self.poll_api(request))
+
+        await interaction.response.send_message(bot_reply)
+
     async def on_ready(self):
         log.info("Connected to discord!")
+
+        await self.set_up_commands()
 
         if self.do_greeting:
             await self.greet()
