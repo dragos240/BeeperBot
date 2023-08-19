@@ -43,11 +43,11 @@ class Layout:
     tab_config: gr.Tab
 
     # bot tab
-    bot_start: gr.Button
-    bot_stop: gr.Button
+    bot_on_toggle: gr.Button
 
     character_dropdown: gr.Dropdown
     params: Dict[str, gr.Slider]
+    reset_sliders: gr.Button
     settings_save: gr.Button
 
     # Config tab
@@ -72,11 +72,8 @@ class Layout:
 
             with self.tab_bot:
                 with gr.Row():
-                    self.bot_start = gr.Button(
-                        value="Start")
-                    self.bot_stop = gr.Button(
-                        value="Stop")
-                    self.bot_stop.interactive = False
+                    self.bot_on_toggle = gr.Button(
+                        value="Toggle Start/Stop")
                 with gr.Row():
                     self.character_dropdown = gr.Dropdown(
                         label="Character")
@@ -96,13 +93,16 @@ class Layout:
                                         value=default_params['top_k'],
                                         step=1, label='top_k')
                         self.params["repetition_penalty"] = gr.Slider(
-                            1.0, 1.5,
+                            0.0, 4096.0,
                             value=default_params['repetition_penalty'],
                             step=0.01, label='repetition_penalty')
-                    with gr.Row():
+                    with gr.Column():
+                        self.reset_sliders = gr.Button(
+                            value="Reset Sliders")
                         self.settings_save = gr.Button(
                             value="Save Settings")
 
+            # Config
             with self.tab_config:
                 with gr.Row():
                     # Config
@@ -188,16 +188,7 @@ class Controller:
         self.worker = None
 
         # Bot tab
-        layout.bot_start.click(self.handle_start,
-                               outputs=[
-                                   layout.bot_stop,
-                                   layout.bot_start
-                               ])
-        layout.bot_stop.click(self.handle_stop,
-                              outputs=[
-                                  layout.bot_start,
-                                  layout.bot_stop
-                              ])
+        layout.bot_on_toggle.click(self.handle_on_toggle)
 
         layout.character_dropdown.choices = self.load_character_choices()
         layout.character_dropdown.value = self.config["character"]
@@ -210,6 +201,9 @@ class Controller:
             key_textbox = gr.Textbox(visible=False, value=key)
             value.change(self.handle_param_change,
                          inputs=[key_textbox, value])
+
+        layout.reset_sliders.click(self.handle_reset_sliders,
+                                   outputs=[*layout.params.values()])
 
         layout.settings_save.click(self.handle_config_save)
 
@@ -256,33 +250,25 @@ class Controller:
     def on_token_change(self, token: str):
         self.layout.discord_token_textbox.update(value=token)
 
-    def handle_start(self) -> List[Dict]:
-        """Is called when the start button is clicked
-
-        Returns:
-            List[Dict]: A list of UI elements to update
+    def handle_on_toggle(self):
+        """Is called when the start/stop toggle button is clicked
         """
-        print("handle_start clicked")
-        self.start_worker()
-
-        return [self.layout.bot_stop.update(interactive=True),
-                self.layout.bot_start.update(interactive=False)]
-
-    def handle_stop(self):
-        """Is called when the stop button is clicked
-
-        Returns:
-            List[Dict]: A list of UI elements to update
-        """
-        print("handle_stop clicked")
-        if self.worker is not None:
+        print("bot_on_toggle clicked")
+        if self.worker is not None \
+                and self.worker.is_running():
             self.worker.stop()
-
-        return [self.layout.bot_start.update(interactive=True),
-                self.layout.bot_stop.update(interactive=False)]
+        else:
+            self.start_worker()
 
     def handle_param_change(self, key: str, value: Any):
         self.discord_bot.params[key] = value
+
+    def handle_reset_sliders(self):
+        values = []
+        for name, slider in self.layout.params.items():
+            values.append(slider.update(value=default_params[name]))
+
+        return values
 
     def handle_config_save(self):
         config = self.get_config()

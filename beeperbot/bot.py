@@ -15,12 +15,14 @@ class DiscordBot(discord.Client):
 
     character: str
     history: Dict
+    do_greeting: bool
     active_channels: List[discord.TextChannel]
     params: Dict[str, Any]
 
     def __init__(self, config: Dict):
         self.character = config["character"]
         self.history = {"internal": [], "visible": []}
+        self.do_greeting = True
         self.active_channels = []
         self.params = config["params"]
 
@@ -35,6 +37,18 @@ class DiscordBot(discord.Client):
 
     async def on_ready(self):
         log.info("Connected to discord!")
+
+        if self.do_greeting:
+            await self.greet()
+            self.do_greeting = False
+
+    async def greet(self):
+        channel = self.get_greeting_channel()
+        self.active_channels.append(channel)
+        request = self.create_request("Say hi~", "Chat")
+        bot_greeting = self.get_bot_reply(self.poll_api(request))
+
+        await channel.send(bot_greeting)
 
     def get_bot_names(self, channel: discord.TextChannel):
         names = [self.character.lower()]
@@ -90,8 +104,8 @@ class DiscordBot(discord.Client):
             self.loop)
 
     async def on_message(self, message: discord.Message):
-        if message.channel.name != "bot-testing":
-            return
+        # if message.channel.name != "bot-testing":
+        #     return
         if message.channel not in self.active_channels \
                 and self.is_name_in_message(message):
             self.active_channels.append(message.channel)
@@ -114,23 +128,38 @@ class DiscordBot(discord.Client):
                       message.clean_content,
                       exc_info=e)
 
+    def get_bot_reply(self, response: Dict) -> str:
+        bot_reply = ""
+        if "internal" in response:
+            bot_reply = response["internal"][-1][-1]
+
+        return bot_reply
+
     async def handle_response(self, message: discord.Message):
-        request = self.create_request(message)
+        request = self.create_request(message.clean_content,
+                                      message.author.display_name)
         response = self.poll_api(request)
 
         log.info("Params: %s", pformat(self.params))
 
-        bot_reply = ""
-        if "internal" in response:
-            bot_reply = response["internal"][-1][-1]
-            await message.reply(bot_reply, mention_author=False)
-            self.history = response
+        bot_reply = self.get_bot_reply(response)
+        await message.reply(bot_reply, mention_author=False)
+        self.history = response
+
+    def get_greeting_channel(self) -> discord.TextChannel:
+        # TODO: Make this a setting
+        for guild in self.guilds:
+            channel: discord.TextChannel
+            for channel in guild.channels:
+                if channel.name == "serial-experiments-nat":
+                    return channel
 
     def create_request(self,
-                       message: discord.Message):
+                       message: str,
+                       display_name: str):
         user_input = "{} says \"{}\"".format(
-            message.author.display_name, message.clean_content)
-        bot_name = self.get_name_with_message(message)
+            display_name, message)
+        bot_name = self.character
 
         request = self.params.copy()
 
