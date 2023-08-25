@@ -6,23 +6,9 @@ import asyncio
 from threading import Thread
 
 import gradio as gr
-from gradio.external_utils import yaml
 
 from .bot import DiscordBot
-
-
-default_params: Dict = {
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "top_k": 20,
-    "repetition_penalty": 1.15,
-}
-
-default_config: Dict = {
-    "character": "None"
-}
-
-CONFIG_PATH = "beeperbot.yaml"
+from .settings import Settings, Params
 
 
 class Layout:
@@ -30,27 +16,36 @@ class Layout:
 
     Attributes:
         tab_bot: bot tab
-        tab_config: Config tab
-        bot_start: Start button for bot
-        bot_stop: Stop button for bot
+        tab_token_config: Token config tab
+
+        bot_on_toggle: On/off toggle for the bot
+        character_dropdown: List of characters
+        controls: Gradio controls
+        reset_sliders: Reset sliders button
+        settings: Settings (linked to a file)
+        settings_save: Settings save button
+
         discord_token_textbox: Textbox to use for entering a Discord token
         discord_token_save: Save button
-        character_dropdown: List of characters
+
         controller: The controller for the UI elements
     """
     # Tabs
     tab_bot: gr.Tab
-    tab_config: gr.Tab
+    tab_token_config: gr.Tab
 
     # bot tab
     bot_on_toggle: gr.Button
-
     character_dropdown: gr.Dropdown
-    params: Dict[str, gr.Slider]
+    controls: Dict[str, gr.Slider]
+    settings: Settings
+    starting_channel: gr.Textbox
+    channel_whitelist: gr.Textbox
+    channel_blacklist: gr.Textbox
     reset_sliders: gr.Button
     settings_save: gr.Button
 
-    # Config tab
+    # Token config tab
     discord_token_textbox: gr.Textbox
     discord_token_save: gr.Button
 
@@ -63,13 +58,16 @@ class Layout:
         Args:
             launch (bool): Whether or not to launch a server (default: `False`)
         """
-        self.params = {}
+        self.settings = Settings()
+        params: Params = self.settings.params
+        self.controls = {}
         with gr.Blocks() as ui:
             self.tab_bot = gr.Tab(
                 label="Bot")
-            self.tab_config = gr.Tab(
+            self.tab_token_config = gr.Tab(
                 label="Config")
 
+            # Bot tab
             with self.tab_bot:
                 with gr.Row():
                     self.bot_on_toggle = gr.Button(
@@ -80,32 +78,42 @@ class Layout:
                 with gr.Row():
                     with gr.Column():
                         # Param controls
-                        self.params["temperature"] \
+                        self.controls["temperature"] \
                             = gr.Slider(0.01, 1.99,
-                                        value=default_params['temperature'],
+                                        value=params.temperature,
                                         step=0.01, label='temperature')
-                        self.params["top_p"] \
+                        self.controls["top_p"] \
                             = gr.Slider(0.0, 1.0,
-                                        value=default_params['top_p'],
+                                        value=params.top_p,
                                         step=0.01, label='top_p')
-                        self.params["top_k"] \
+                        self.controls["top_k"] \
                             = gr.Slider(0, 200,
-                                        value=default_params['top_k'],
+                                        value=params.top_k,
                                         step=1, label='top_k')
-                        self.params["repetition_penalty"] = gr.Slider(
+                        self.controls["repetition_penalty"] = gr.Slider(
                             0.0, 4096.0,
-                            value=default_params['repetition_penalty'],
+                            value=params.repetition_penalty,
                             step=0.01, label='repetition_penalty')
                     with gr.Column():
+                        self.starting_channel = gr.Textbox(
+                            label="Starting Channel",
+                            interactive=True)
+                        self.channel_whitelist = gr.Textbox(
+                            label="Channel Whitelist",
+                            placeholder="Leave blank to disable",
+                            interactive=True)
+                        self.channel_blacklist = gr.Textbox(
+                            label="Channel Blacklist",
+                            placeholder="Leave blank to disable",
+                            interactive=True)
                         self.reset_sliders = gr.Button(
                             value="Reset Sliders")
                         self.settings_save = gr.Button(
                             value="Save Settings")
 
-            # Config
-            with self.tab_config:
+            # Token config tab
+            with self.tab_token_config:
                 with gr.Row():
-                    # Config
                     self.discord_token_textbox = gr.Textbox(
                         label="Discord token",
                         value="",
@@ -123,16 +131,16 @@ class Worker:
     thread: Optional[Thread]
     discord_bot: DiscordBot
     token: str
-    config: Dict[str, Any]
+    settings: Settings
 
     def __init__(self,
                  discord_bot: DiscordBot,
                  token: str,
-                 config: Dict[str, Any]):
+                 settings: Settings):
         self.thread = None
         self.discord_bot = discord_bot
         self.token = token
-        self.config = config
+        self.settings = settings
 
     def is_running(self):
         return self.thread is not None \
@@ -140,7 +148,7 @@ class Worker:
 
     async def start_bot(self):
         if self.discord_bot.is_closed():
-            self.discord_bot = DiscordBot(self.config)
+            self.discord_bot = DiscordBot(self.settings)
         await self.discord_bot.start(self.token)
         await self.discord_bot.wait_until_ready()
 
@@ -177,35 +185,48 @@ class Controller:
         character: A Dict containing character data
     """
     layout: Layout
-    config: Dict
+    settings: Settings
     discord_bot: DiscordBot
     worker: Optional[Worker]
 
     def __init__(self, layout: Layout):
         self.layout = layout
-        self.config = self.get_config()
-        self.discord_bot = DiscordBot(self.config)
+        self.settings = layout.settings
+        self.discord_bot = DiscordBot(self.settings)
         self.worker = None
 
         # Bot tab
         layout.bot_on_toggle.click(self.handle_on_toggle)
 
         layout.character_dropdown.choices = self.load_character_choices()
-        layout.character_dropdown.value = self.config["character"]
+        layout.character_dropdown.value = self.settings.character
         layout.character_dropdown.select(
             self.handle_character_select,
             inputs=layout.character_dropdown)
 
-        for key, value in layout.params.items():
-            value.value = self.config["params"][value.label]
-            key_textbox = gr.Textbox(visible=False, value=key)
-            value.change(self.handle_param_change,
-                         inputs=[key_textbox, value])
+        for name, control in layout.controls.items():
+            # TODO Implement a better way to fetch the values without getattr
+            control.value = getattr(self.settings.params, control.label)
+            key_textbox = gr.Textbox(visible=False, value=name)
+            control.change(self.handle_param_change,
+                           inputs=[key_textbox, control])
+
+        layout.starting_channel.value = self.settings.starting_channel
+        layout.starting_channel.change(self.handle_starting_channel,
+                                       inputs=layout.starting_channel)
+
+        layout.channel_whitelist.value = self.settings.channel_whitelist
+        layout.channel_whitelist.input(self.handle_channel_whitelist,
+                                       inputs=layout.channel_whitelist)
+
+        layout.channel_blacklist.value = self.settings.channel_blacklist
+        layout.channel_blacklist.change(self.handle_channel_blacklist,
+                                        inputs=layout.channel_blacklist)
 
         layout.reset_sliders.click(self.handle_reset_sliders,
-                                   outputs=[*layout.params.values()])
+                                   outputs=[*layout.controls.values()])
 
-        layout.settings_save.click(self.handle_config_save)
+        layout.settings_save.click(self.handle_settings_save)
 
         # Config tab
         layout.discord_token_textbox.value = self.load_token_value()
@@ -215,30 +236,17 @@ class Controller:
 
         layout.discord_token_save.click(self.handle_save_token)
 
-    def get_config(self) -> Dict:
-        config = default_config.copy()
-        config["params"] = default_params.copy()
-        config_path = Path(CONFIG_PATH)
-
-        if config_path.exists():
-            with open(config_path, "r") as f:
-                config.update(yaml.full_load(f.read()))
-        else:
-            with open(config_path, "w") as f:
-                f.write(yaml.dump(config))
-
-        return config
-
     def start_worker(self):
         """Creates a worker and starts it"""
         token = self.load_token_value()
         if token and self.worker is None:
-            self.worker = Worker(self.discord_bot, token, self.config)
+            self.worker = Worker(self.discord_bot, token, self.settings)
             self.worker.start()
         elif self.worker is not None \
                 and self.worker.discord_bot.is_closed():
             self.worker.start()
         else:
+            # This shouldn't be reached. If it does, create an issue
             log.info("Oops! This is awkward...")
             if self.worker is None:
                 log.info("Worker is None")
@@ -248,11 +256,15 @@ class Controller:
                     log.info("Bot is closed")
 
     def on_token_change(self, token: str):
+        """Called on change of token value
+
+        Args:
+            token (str): The new token value
+        """
         self.layout.discord_token_textbox.update(value=token)
 
     def handle_on_toggle(self):
-        """Is called when the start/stop toggle button is clicked
-        """
+        """Is called when the start/stop toggle button is clicked"""
         print("bot_on_toggle clicked")
         if self.worker is not None \
                 and self.worker.is_running():
@@ -261,22 +273,49 @@ class Controller:
             self.start_worker()
 
     def handle_param_change(self, key: str, value: Any):
+        """Is called when a param value is changed
+
+        Args:
+            key (str): The name of the param
+            value (Any): The new value
+        """
         self.discord_bot.params[key] = value
 
+    def handle_starting_channel(self, data: str):
+        if type(data) is str:
+            self.discord_bot.starting_channel = data
+
+        self.layout.starting_channel.update(value=data)
+
+    def handle_channel_whitelist(self, data: str):
+        if type(data) is str:
+            self.discord_bot.channel_whitelist = data
+
+        self.layout.channel_whitelist.update(value=data)
+
+    def handle_channel_blacklist(self, data: str):
+        if type(data) is str:
+            self.discord_bot.channel_blacklist = data
+
+        self.layout.channel_blacklist.update(value=data)
+
     def handle_reset_sliders(self):
+        params = self.settings.params
         values = []
-        for name, slider in self.layout.params.items():
-            values.append(slider.update(value=default_params[name]))
+        for name, slider in self.layout.controls.items():
+            values.append(slider.update(value=getattr(params, name)))
 
         return values
 
-    def handle_config_save(self):
-        config = self.get_config()
+    def handle_settings_save(self):
+        settings = self.settings
 
-        config["character"] = self.discord_bot.character
-        config["params"] = self.discord_bot.params
-        with open(CONFIG_PATH, "w") as f:
-            f.write(yaml.dump(config))
+        settings.character = self.discord_bot.character
+        settings.params = self.discord_bot.params
+        settings.starting_channel = self.discord_bot.starting_channel
+        settings.channel_whitelist = self.discord_bot.channel_whitelist
+        settings.channel_blacklist = self.discord_bot.channel_blacklist
+        settings.save_to_file()
 
     def load_token_value(self):
         try:

@@ -1,11 +1,13 @@
 import asyncio
 import logging as log
-from pprint import pformat, pprint
-from typing import Any, Dict, List
+from pprint import pformat
+from typing import Any, Dict, List, Optional
 from discord.app_commands import CommandTree
 
 import requests
 import discord
+
+from .settings import Settings, Params
 
 DEFAULT_BASE_URL = "http://localhost:5000"
 CHAT_ENDPOINT = f"{DEFAULT_BASE_URL}/api/v1/chat"
@@ -15,21 +17,34 @@ class DiscordBot(discord.Client):
     """Discord bot the UI uses"""
 
     character: str
+    channel_whitelist: str
+    channel_blacklist: str
     history: Dict
     do_greeting: bool
     active_channels: List[discord.TextChannel]
-    params: Dict[str, Any]
+    params: Params
     tree: CommandTree
 
-    def __init__(self, config: Dict):
-        self.character = config["character"]
+    def __init__(self, settings: Settings):
+        self.character = settings.character
+        self.starting_channel = settings.starting_channel
+        self.channel_whitelist = settings.channel_whitelist
+        self.channel_blacklist = settings.channel_blacklist
         self.history = {"internal": [], "visible": []}
         self.do_greeting = True
         self.active_channels = []
-        self.params = config["params"]
+        self.params = settings.params
 
         super().__init__(intents=self.get_intents())
         self.tree = CommandTree(self)
+
+    def is_channel_allowed(self, channel_name: str) -> bool:
+        if channel_name in self.channel_blacklist:
+            return False
+        elif channel_name not in self.channel_whitelist:
+            return False
+
+        return True
 
     async def setup_hook(self):
         for guild in self.guilds:
@@ -85,6 +100,8 @@ class DiscordBot(discord.Client):
             self.do_greeting = False
 
     async def greet(self):
+        if not self.starting_channel:
+            return
         channel = self.get_greeting_channel()
         self.active_channels.append(channel)
         request = self.create_request("Say hi~", "Chat")
@@ -134,6 +151,8 @@ class DiscordBot(discord.Client):
         if self.character == "None":
             return
         for channel in self.active_channels:
+            if not self.is_channel_allowed(channel.name):
+                continue
             members = channel.guild.members
             for member in members:
                 if member.id == self.get_id():
@@ -149,7 +168,8 @@ class DiscordBot(discord.Client):
         # if message.channel.name != "bot-testing":
         #     return
         if message.channel not in self.active_channels \
-                and self.is_name_in_message(message):
+                and self.is_name_in_message(message) \
+                and self.is_channel_allowed(message.channel.name):
             self.active_channels.append(message.channel)
             log.info("I was pinged in %s. I can now talk there!",
                      message.channel.name)
@@ -189,11 +209,11 @@ class DiscordBot(discord.Client):
         self.history = response
 
     def get_greeting_channel(self) -> discord.TextChannel:
-        # TODO: Make this a setting
+        starting_channel = self.starting_channel
         for guild in self.guilds:
             channel: discord.TextChannel
             for channel in guild.channels:
-                if channel.name == "serial-experiments-nat":
+                if channel.name == starting_channel:
                     return channel
 
     def create_request(self,
@@ -203,7 +223,7 @@ class DiscordBot(discord.Client):
             display_name, message)
         bot_name = self.character
 
-        request = self.params.copy()
+        request = self.params.to_dict()
 
         # It's possible some values accidentally resolve to None
         for k, v in request.items():
