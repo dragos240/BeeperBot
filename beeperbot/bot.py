@@ -1,8 +1,11 @@
 import asyncio
 import logging as log
 from pprint import pformat
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
+
+
 from discord.app_commands import CommandTree
+from gradio.external_utils import yaml
 
 import requests
 import discord
@@ -34,6 +37,7 @@ class DiscordBot(discord.Client):
         self.do_greeting = True
         self.active_channels = []
         self.params = settings.params
+        self.mode = "instruct"
 
         super().__init__(intents=self.get_intents())
         self.tree = CommandTree(self)
@@ -76,6 +80,14 @@ class DiscordBot(discord.Client):
         intents.message_content = True
         intents.members = True
         return intents
+
+    async def close(self):
+        await self.bid_farewell()
+        await super().close()
+
+    async def bid_farewell(self):
+        for channel in self.active_channels:
+            await channel.send("Signing off...")
 
     @discord.app_commands.describe(
         message="Message to repeat"
@@ -219,11 +231,30 @@ class DiscordBot(discord.Client):
     def create_request(self,
                        message: str,
                        display_name: str):
+        if self.mode == "chat":
+            return self.create_chat_request(message, display_name)
+        elif self.mode == "instruct":
+            return self.create_instruct_request(message, display_name)
+
+    def create_instruct_request(self,
+                                message: str,
+                                display_name: str):
         user_input = "{} says \"{}\"".format(
             display_name, message)
-        bot_name = self.character
+        # bot_name = self.character
+        instruct_data = {}
+        with open(f"instruct-contexts/{self.character}.yaml", "r") as f:
+            instruct_data = yaml.full_load(f.read())
+        user_string = instruct_data["user_string"]
+        bot_string = instruct_data["bot_string"]
+        persona = instruct_data["context"] \
+            .replace("USER", user_string) \
+            .replace("BOT", bot_string)
+        turn_template = instruct_data["turn_template"]
 
         request = self.params.to_dict()
+
+        print("Params:", pformat(request))
 
         # It's possible some values accidentally resolve to None
         for k, v in request.items():
@@ -232,45 +263,16 @@ class DiscordBot(discord.Client):
 
         request.update({
             'user_input': user_input,
-            # 'max_new_tokens': 250,
-            # 'auto_max_new_tokens': False,
             'history': self.history,
-            'mode': 'chat',
-            'character': self.character,
-            'your_name': "You",
-            # 'name1': message.author.display_name,
-            'name2': bot_name,
-            # 'context': 'character context', # Optional
-            # 'greeting': 'greeting', # Optional
-            # 'name1_instruct': 'You', # Optional
-            # 'name2_instruct': 'Assistant', # Optional
-            # 'context_instruct': 'context_instruct', # Optional
-            # 'turn_template': 'turn_template', # Optional
+            'mode': 'instruct',
+            'your_name': "",
+            'name1_instruct': user_string,  # Optional
+            'name2_instruct': bot_string,  # Optional
+            'context_instruct': persona,
+            'turn_template': turn_template,
             'regenerate': False,
             '_continue': False,
-            # 'preset': 'None',
             'do_sample': True,
-            # 'temperature': self.params["temperature"],
-            # 'top_p': self.params["top_p"],
-            # 'typical_p': 1,
-            # 'epsilon_cutoff': 0,  # In units of 1e-4
-            # 'eta_cutoff': 0,  # In units of 1e-4
-            # 'tfs': 1,
-            # 'top_a': 0,
-            # 'repetition_penalty': self.params["repetition_penalty"],
-            # 'repetition_penalty_range': 0,
-            # 'top_k': self.params["top_k"],
-            # 'min_length': 0,
-            # 'no_repeat_ngram_size': 0,
-            # 'num_beams': 1,
-            # 'penalty_alpha': 0,
-            # 'length_penalty': 1,
-            # 'early_stopping': False,
-            # 'mirostat_mode': 0,
-            # 'mirostat_tau': 5,
-            # 'mirostat_eta': 0.1,
-            # 'guidance_scale': 1,
-            # 'negative_prompt': '',
 
             'seed': -1,
             'add_bos_token': True,
@@ -279,6 +281,51 @@ class DiscordBot(discord.Client):
             'skip_special_tokens': True,
             'stopping_strings': []
         })
+
+        return request
+
+    def create_chat_request(self,
+                            message: str,
+                            display_name: str):
+        user_input = "{} says \"{}\"".format(
+            display_name, message)
+        bot_name = self.character
+
+        request = self.params.to_dict()
+
+        # Prevent None values from going into the request
+        for name, value in request.items():
+            if value is None:
+                request[name] = Params.defaults[name]
+
+        log.info("Params: %s", yaml.dump(request, indent=2))
+
+        request.update({
+            'user_input': user_input,
+            'history': self.history,
+            'mode': 'chat',
+            'your_name': "",
+            'name2': bot_name,
+            'regenerate': False,
+            '_continue': False,
+            'do_sample': True,
+
+            'seed': -1,
+            'add_bos_token': True,
+            'truncation_length': 2048,
+            'ban_eos_token': False,
+            'skip_special_tokens': True,
+            'stopping_strings': []
+        })
+
+        try:
+            with open(f"characters/{self.character}.yaml") as f:
+                character_context = yaml.full_load(f.read())["context"]
+            request["context"] = character_context
+        except OSError:
+            log.error("Cannot find character %s! Going with defaults",
+                      self.character)
+            pass
 
         return request
 

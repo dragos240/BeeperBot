@@ -37,6 +37,7 @@ class Layout:
     # bot tab
     bot_on_toggle: gr.Button
     character_dropdown: gr.Dropdown
+    refresh_characters_button: gr.Button
     controls: Dict[str, gr.Slider]
     settings: Settings
     starting_channel: gr.Textbox
@@ -75,6 +76,8 @@ class Layout:
                 with gr.Row():
                     self.character_dropdown = gr.Dropdown(
                         label="Character")
+                    self.refresh_characters_button = gr.Button(
+                        value="Refresh Characters")
                 with gr.Row():
                     with gr.Column():
                         # Param controls
@@ -106,10 +109,11 @@ class Layout:
                             label="Channel Blacklist",
                             placeholder="Leave blank to disable",
                             interactive=True)
-                        self.reset_sliders = gr.Button(
-                            value="Reset Sliders")
-                        self.settings_save = gr.Button(
-                            value="Save Settings")
+                with gr.Row():
+                    self.reset_sliders = gr.Button(
+                        value="Reset Sliders")
+                    self.settings_save = gr.Button(
+                        value="Save Settings")
 
             # Token config tab
             with self.tab_token_config:
@@ -203,6 +207,9 @@ class Controller:
         layout.character_dropdown.select(
             self.handle_character_select,
             inputs=layout.character_dropdown)
+        layout.refresh_characters_button.click(
+            self.handle_refresh_characters,
+            outputs=layout.character_dropdown)
 
         for name, control in layout.controls.items():
             # TODO Implement a better way to fetch the values without getattr
@@ -272,6 +279,10 @@ class Controller:
         else:
             self.start_worker()
 
+    def handle_refresh_characters(self):
+        return self.layout.character_dropdown.update(
+            choices=self.load_character_choices())
+
     def handle_param_change(self, key: str, value: Any):
         """Is called when a param value is changed
 
@@ -279,7 +290,7 @@ class Controller:
             key (str): The name of the param
             value (Any): The new value
         """
-        self.discord_bot.params[key] = value
+        setattr(self.discord_bot.params, key, value)
 
     def handle_starting_channel(self, data: str):
         if type(data) is str:
@@ -300,10 +311,10 @@ class Controller:
         self.layout.channel_blacklist.update(value=data)
 
     def handle_reset_sliders(self):
-        params = self.settings.params
+        defaults = self.settings.params.defaults
         values = []
         for name, slider in self.layout.controls.items():
-            values.append(slider.update(value=getattr(params, name)))
+            values.append(slider.update(value=defaults[name]))
 
         return values
 
