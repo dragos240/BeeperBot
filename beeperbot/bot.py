@@ -2,6 +2,7 @@ import asyncio
 import logging as log
 from pprint import pformat
 from typing import Dict, List
+import os
 
 
 from discord.app_commands import CommandTree
@@ -231,38 +232,35 @@ class DiscordBot(discord.Client):
     def create_request(self,
                        message: str,
                        display_name: str):
+        base_request = self.params.to_dict()
+        base_request["user_input"] \
+            = "{}: {}".format(display_name, message)
+        log.info("Params: %s", yaml.dump(self.params.to_dict(), indent=2))
         if self.mode == "chat":
-            return self.create_chat_request(message, display_name)
+            return self.create_chat_request(base_request)
         elif self.mode == "instruct":
-            return self.create_instruct_request(message, display_name)
+            return self.create_instruct_request(base_request)
 
-    def create_instruct_request(self,
-                                message: str,
-                                display_name: str):
-        user_input = "{} says \"{}\"".format(
-            display_name, message)
-        # bot_name = self.character
+    def create_instruct_request(self, base_request: Dict):
+        request = base_request
+
         instruct_data = {}
+        os.makedirs("instruct-contexts", exist_ok=True)
         with open(f"instruct-contexts/{self.character}.yaml", "r") as f:
             instruct_data = yaml.full_load(f.read())
         user_string = instruct_data["user_string"]
         bot_string = instruct_data["bot_string"]
         persona = instruct_data["context"] \
-            .replace("USER", user_string) \
-            .replace("BOT", bot_string)
+            .replace("USER ", user_string) \
+            .replace("BOT ", bot_string)
         turn_template = instruct_data["turn_template"]
 
-        request = self.params.to_dict()
-
-        print("Params:", pformat(request))
-
-        # It's possible some values accidentally resolve to None
-        for k, v in request.items():
-            if v is None:
-                request[k] = 0.0
+        # Prevent None values from going into the request
+        for name, value in request.items():
+            if value is None:
+                request[name] = Params.defaults[name]
 
         request.update({
-            'user_input': user_input,
             'history': self.history,
             'mode': 'instruct',
             'your_name': "",
@@ -284,28 +282,19 @@ class DiscordBot(discord.Client):
 
         return request
 
-    def create_chat_request(self,
-                            message: str,
-                            display_name: str):
-        user_input = "{} says \"{}\"".format(
-            display_name, message)
-        bot_name = self.character
-
-        request = self.params.to_dict()
+    def create_chat_request(self, base_request: Dict = {}):
+        request = base_request
 
         # Prevent None values from going into the request
         for name, value in request.items():
             if value is None:
                 request[name] = Params.defaults[name]
 
-        log.info("Params: %s", yaml.dump(request, indent=2))
-
         request.update({
-            'user_input': user_input,
             'history': self.history,
             'mode': 'chat',
             'your_name': "",
-            'name2': bot_name,
+            'name2': self.character,
             'regenerate': False,
             '_continue': False,
             'do_sample': True,
