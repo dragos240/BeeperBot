@@ -52,6 +52,7 @@ class Params:
 
 class Settings:
     character: str
+    mode: str
     starting_channel: str
     channel_blacklist: str
     channel_whitelist: str
@@ -62,6 +63,7 @@ class Settings:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "mode": self.mode,
             "character": self.character,
             "starting_channel": self.starting_channel,
             "channel_blacklist": self.channel_blacklist,
@@ -74,16 +76,25 @@ class Settings:
             f.write(yaml.dump(self.to_dict()))
 
     def load_from_file(self):
+        data = {
+            "mode": "chat",
+            "character": "None",
+            "starting_channel": "",
+            "channel_blacklist": "",
+            "channel_whitelist": "",
+            "params": {},
+        }
         try:
             with open(SETTINGS_PATH, "r") as f:
-                data = yaml.full_load(f.read())
-            self.character = data["character"]
-            self.starting_channel = data.get("starting_channel", "")
-            self.channel_blacklist = data.get("channel_blacklist", "")
-            self.channel_whitelist = data.get("channel_whitelist", "")
-            params = data.get("params")
-            self.params = Params.from_defaults()
-            if type(params) is dict:
-                self.params = Params(**params)
+                data.update(yaml.full_load(f.read()))
         except OSError:
             pass
+        self.mode = data["mode"]
+        self.character = data["character"]
+        self.starting_channel = data["starting_channel"]
+        self.channel_blacklist = data["channel_blacklist"]
+        self.channel_whitelist = data["channel_whitelist"]
+        params = data["params"]
+        self.params = Params.from_defaults()
+        if not params:
+            self.params = Params(**params)

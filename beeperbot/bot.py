@@ -38,6 +38,7 @@ class DiscordBot(discord.Client):
     do_greeting: bool
     active_channels: Dict[str, ChannelContainer]
     params: Params
+    mode: str
     tree: CommandTree
 
     def __init__(self, settings: Settings):
@@ -48,7 +49,7 @@ class DiscordBot(discord.Client):
         self.do_greeting = True
         self.active_channels = {}
         self.params = settings.params
-        self.mode = "instruct"
+        self.mode = settings.mode
 
         super().__init__(intents=self.get_intents())
         self.tree = CommandTree(self)

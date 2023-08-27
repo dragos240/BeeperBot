@@ -38,6 +38,8 @@ class Layout:
     bot_on_toggle: gr.Button
     character_dropdown: gr.Dropdown
     refresh_characters_button: gr.Button
+    generation_mode_radio: gr.Radio
+
     controls: Dict[str, gr.Slider]
     settings: Settings
     starting_channel: gr.Textbox
@@ -74,10 +76,23 @@ class Layout:
                     self.bot_on_toggle = gr.Button(
                         value="Toggle Start/Stop")
                 with gr.Row():
-                    self.character_dropdown = gr.Dropdown(
-                        label="Character")
-                    self.refresh_characters_button = gr.Button(
-                        value="Refresh Characters")
+                    with gr.Column():
+                        self.character_dropdown_note = gr.Markdown(
+                            value=(
+                                "**Note**: `instruct` and `chat` load from "
+                                + "different source folders. "
+                                + "`instruct` loads from `instruct-contexts` "
+                                + "and `chat` loads from `characters`. "
+                                + "See README.md for details."))
+                        self.generation_mode_radio = gr.Radio(
+                            ["chat", "instruct"],
+                            label="Generation Mode")
+                    with gr.Column():
+                        self.refresh_characters_button = gr.Button(
+                            value="Refresh Characters",
+                            elem_id="refresh-characters")
+                        self.character_dropdown = gr.Dropdown(
+                            label="Character")
                 with gr.Row():
                     with gr.Column():
                         # Param controls
@@ -202,13 +217,23 @@ class Controller:
         # Bot tab
         layout.bot_on_toggle.click(self.handle_on_toggle)
 
+        # Character dropdown config
         layout.character_dropdown.choices = self.load_character_choices()
         layout.character_dropdown.value = self.settings.character
         layout.character_dropdown.select(
             self.handle_character_select,
             inputs=layout.character_dropdown)
+
+        # Refresh characters config
         layout.refresh_characters_button.click(
             self.handle_refresh_characters,
+            outputs=layout.character_dropdown)
+
+        # Generation mode config
+        layout.generation_mode_radio.value = self.settings.mode
+        layout.generation_mode_radio.input(
+            self.handle_generation_mode_select,
+            inputs=layout.generation_mode_radio,
             outputs=layout.character_dropdown)
 
         for name, control in layout.controls.items():
@@ -283,6 +308,14 @@ class Controller:
         return self.layout.character_dropdown.update(
             choices=self.load_character_choices())
 
+    def handle_generation_mode_select(self,
+                                      mode: str):
+        self.discord_bot.mode = mode
+        print("Changed generation mode to %s" % mode)
+
+        return self.layout.character_dropdown.update(
+            choices=self.load_character_choices())
+
     def handle_param_change(self, key: str, value: Any):
         """Is called when a param value is changed
 
@@ -321,6 +354,7 @@ class Controller:
     def handle_settings_save(self):
         settings = self.settings
 
+        settings.mode = self.discord_bot.mode
         settings.character = self.discord_bot.character
         settings.params = self.discord_bot.params
         settings.starting_channel = self.discord_bot.starting_channel
@@ -347,16 +381,21 @@ class Controller:
 
     def load_character_choices(self):
         characters = []
-        for ext in ["yml", "yaml", "json"]:
-            for filepath in Path("characters").glob(f"*.{ext}"):
-                characters.append(filepath.stem)
+        path = "characters"
+        if self.discord_bot.mode == "instruct":
+            path = "instruct-contexts"
+        for filepath in Path(path).glob(f"*.yaml"):
+            characters.append(filepath.stem)
 
         return characters
 
     def handle_character_select(self, character: str):
         log.info("Selected character: %s", character)
 
-        char_path = Path(f"characters/{character}.yaml")
+        base_path = "characters"
+        if self.discord_bot.mode == "instruct":
+            base_path = "instruct-contexts"
+        char_path = Path(f"{base_path}/{character}.yaml")
         if char_path.exists():
             if self.worker is not None and self.worker.is_running():
                 self.discord_bot.update_character(character)
