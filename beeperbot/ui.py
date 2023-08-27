@@ -1,6 +1,6 @@
 from pathlib import Path
 from time import sleep
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import logging as log
 import asyncio
 from threading import Thread

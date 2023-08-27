@@ -2,7 +2,7 @@
 
 ## Setup
 
-Put the URL of this repository into the "Install or update an extension" field in the "Session" tab and hit Enter. Enable the extension and restart text-generation-webui.
+Put the URL of this repository into the "Install or update an extension" field in the "Session" tab and hit Enter. Enable the extension and restart text-generation-webui. If the extension fails to load, you may need to run `pip install -r requirements.txt` from within the extension's directory. Make sure you're in the correct env before you do this!
 
 After a restart, navigate to the New "BeeperBot" tab and in the "Config" sub-tab, put the token of your Discord bot, then hit the "Save" button.
 
