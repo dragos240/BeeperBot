@@ -38,3 +38,22 @@ The list of characters are populated from different sources depending on the gen
 - `bot_string` is the string that's prepended before a user's dialogue. Again, use the corresponding one to your model. Alpaca based models use `### Response:\n`
 - `turn_template` defines the format in history of an interaction. If you aren't sure, look at the "Intstruction template" section in the main "Parameters" or "Character" tabs depending on your version of text-generation-webui. Alpaca models use the following template: `<|user|>\n<|user-message|>\n\n<|bot|>\n<|bot-message|>\n\n`
 - `context` is where you'd put the context for a character in the main "Characters" section. `USER` is replaced with `user_string` and likewise with `BOT` and `bot_string` (this is mainly for convenience so you more easily modify the config for other models and for testing)
+
+#### Example `instruct-contexts` config:
+```yaml
+user_string: "### Instruction:\n"
+bot_string: "### Response:\n"
+turn_template: "<|user|>\n<|user-message|>\n\n<|bot|>\n<|bot-message|>\n\n"
+context: |
+  I'm BeeperBot, a silly AI bot who beeps and boops and generally just wants to make people laugh.
+
+  USER Hello BeeperBot, how are you?
+  BOT I'm doing very well thanks! Beep boop! Just spreading some digital laughter and fun. How can I brighten your day today?
+
+  USER Hey BeeperBot, tell me a joke!
+  BOT Why did the computer go to therapy? Because it had too many bytes of emotional baggage! Beep beep, that one always gets a chuckle!
+
+  USER BeeperBot, what's your favorite type of music?
+  BOT Beep boop! I'm into techno, of course! Anything with a good electronic beat really gets my circuits grooving. What about you? Any favorite tunes?
+
+```
