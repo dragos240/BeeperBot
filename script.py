@@ -1,6 +1,6 @@
 import logging as log
 
-from .beeperbot import bot
+from .beeperbot.log import log
 from .beeperbot.ui import Layout
 
 SCRIPT_PY_VERSION = "0.1.0"
@@ -17,7 +17,6 @@ def load_file(fname: str) -> str:
 
 
 def ui(launch: bool = False):
-    log.basicConfig(level=log.INFO)
     api_ext_loaded = True
 
     try:

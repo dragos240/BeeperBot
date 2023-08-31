@@ -1,7 +1,6 @@
 import asyncio
-import logging as log
 from pprint import pformat
-from typing import Dict, List, Tuple
+from typing import Dict
 import os
 
 
@@ -12,6 +11,7 @@ import requests
 import discord
 
 from .settings import Settings, Params
+from .log import log
 
 DEFAULT_BASE_URL = "http://localhost:5000"
 CHAT_ENDPOINT = f"{DEFAULT_BASE_URL}/api/v1/chat"
@@ -245,7 +245,7 @@ class DiscordBot(discord.Client):
             channel_container.history)
         response = self.poll_api(request)
 
-        log.info("Params: %s", pformat(self.params))
+        log.info("Params: %s", pformat(self.params.to_dict()))
 
         bot_reply = self.get_bot_reply(response)
         await message.reply(bot_reply, mention_author=False)
