@@ -39,11 +39,12 @@ def ui(launch: bool = False):
 
 
 def custom_css() -> str:
-    return """
-        #refresh-characters, #channels-column-box {
-            height: 100%;
-        }
-    """
+    return ""
+    # return """
+    #     #refresh-characters, #channels-column-box {
+    #         height: 100%;
+    #     }
+    # """
 
 
 def custom_js() -> str:

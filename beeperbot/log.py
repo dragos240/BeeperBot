@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 
 
 class BeeperLogger:
@@ -46,11 +46,11 @@ class BeeperLogger:
 
     def error(self,
               msg: str,
-              e: Exception = None,
+              exc: Optional[Exception] = None,
               *args):
         self.log_buffer.append(
             self.get_formatted(msg, "ERROR", *args))
-        self.logger.error(msg, *args, exc_info=e)
+        self.logger.error(msg, *args, exc_info=exc)
 
 
 log = BeeperLogger()

@@ -82,7 +82,7 @@ class Settings:
             "starting_channel": "",
             "channel_blacklist": "",
             "channel_whitelist": "",
-            "params": {},
+            "params": Params.defaults,
         }
         try:
             with open(SETTINGS_PATH, "r") as f:

@@ -1,5 +1,6 @@
 user_string: "### Instruction:\n"
 bot_string: "### Response:\n"
+name: "BeeperBot"
 turn_template: "<|user|>\n<|user-message|>\n\n<|bot|>\n<|bot-message|>\n\n"
 context: |
   I'm BeeperBot, a silly AI bot who beeps and boops and generally just wants to make people laugh.

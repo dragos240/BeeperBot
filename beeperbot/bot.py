@@ -109,12 +109,14 @@ class DiscordBot(discord.Client):
 
     async def reset(self, interaction: discord.Interaction):
         channel = interaction.channel
-        if channel is None:
+        if channel is None or isinstance(channel, discord.DMChannel):
             return
         channel_container = ChannelContainer(channel)
         request = self.create_request("Say hi~",
                                       "Chat",
                                       channel_container.history)
+        if channel.name is None:
+            return
         self.active_channels[channel.name] = channel_container
         bot_reply = self.get_bot_reply(self.poll_api(request))
 
@@ -147,13 +149,17 @@ class DiscordBot(discord.Client):
         if self.user is not None:
             names.append(self.user.display_name.lower())
             for member in channel.members:
-                if member.id == self.get_id():
+                if member.nick is None:
+                    continue
+                elif member.id == self.get_id():
                     names.append(member.nick)
                     break
 
         return names
 
     def get_name_with_message(self, message: discord.Message):
+        if not isinstance(message.channel, discord.TextChannel):
+            return
         names = self.get_bot_names(message.channel)
         result = self.character
 
@@ -164,6 +170,8 @@ class DiscordBot(discord.Client):
         return result
 
     def is_name_in_message(self, message: discord.Message) -> bool:
+        if not isinstance(message.channel, discord.TextChannel):
+            return False
         names = self.get_bot_names(message.channel)
 
         for name in names:
@@ -206,6 +214,8 @@ class DiscordBot(discord.Client):
         return False
 
     async def on_message(self, message: discord.Message):
+        if not isinstance(message.channel, discord.TextChannel):
+            return
         if (not self.is_active_channel(message.channel)
             and self.is_name_in_message(message)
                 and self.is_channel_allowed(message.channel.name)):
@@ -226,9 +236,8 @@ class DiscordBot(discord.Client):
             async with message.channel.typing():
                 await self.handle_response(message)
         except discord.DiscordException as e:
-            log.error("Exception while processing message: %s",
-                      message.clean_content,
-                      exc_info=e)
+            log.error(f"Exception while processing message: {message.clean_content}",
+                      exc=e)
 
     def get_bot_reply(self, response: Dict) -> str:
         bot_reply = ""
@@ -238,6 +247,8 @@ class DiscordBot(discord.Client):
         return bot_reply
 
     async def handle_response(self, message: discord.Message):
+        if not isinstance(message.channel, discord.TextChannel):
+            return
         channel_container = self.active_channels[message.channel.name]
         request = self.create_request(
             message.clean_content,
@@ -254,22 +265,25 @@ class DiscordBot(discord.Client):
     def get_greeting_channel(self) -> discord.TextChannel:
         starting_channel = self.starting_channel
         for guild in self.guilds:
-            channel: discord.TextChannel
             for channel in guild.channels:
+                if not isinstance(channel, discord.TextChannel):
+                    continue
                 if channel.name == starting_channel:
                     return channel
+
+        raise Exception("Could not get greeting channel")
 
     def create_request(self,
                        message: str,
                        display_name: str,
-                       history: Dict):
+                       history: Dict) -> Dict:
         base_request = self.params.to_dict()
         base_request.update({"user_input": "{}: {}".format(display_name, message),
                              "history": history})
         log.info("Params: %s", yaml.dump(self.params.to_dict(), indent=2))
         if self.mode == "chat":
             return self.create_chat_request(base_request)
-        elif self.mode == "instruct":
+        else:
             return self.create_instruct_request(base_request)
 
     def create_instruct_request(self,
@@ -345,8 +359,7 @@ class DiscordBot(discord.Client):
                 character_context = yaml.full_load(f.read())["context"]
             request["context"] = character_context
         except OSError:
-            log.error("Cannot find character %s! Going with defaults",
-                      self.character)
+            log.error(f"Cannot find character {self.character}! Going with defaults")
             pass
 
         return request
@@ -355,7 +368,7 @@ class DiscordBot(discord.Client):
         response = requests.post(CHAT_ENDPOINT, json=request)
 
         if response.status_code != 200:
-            log.warning(f"Status code came back as {response.status_code}")
+            log.warn(f"Status code came back as {response.status_code}")
 
             return {}
 

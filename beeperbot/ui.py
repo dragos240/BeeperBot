@@ -37,6 +37,7 @@ class Layout:
     # bot tab
     bot_on_toggle: gr.Button
     character_dropdown: gr.Dropdown
+    instruction_template_dropdown: gr.Dropdown
     refresh_characters_button: gr.Button
     generation_mode_radio: gr.Radio
 
@@ -76,23 +77,26 @@ class Layout:
                     self.bot_on_toggle = gr.Button(
                         value="Toggle Start/Stop")
                 with gr.Row():
-                    with gr.Column():
-                        self.character_dropdown_note = gr.Markdown(
-                            value=(
-                                "**Note**: `instruct` and `chat` load from "
-                                + "different source folders. "
-                                + "`instruct` loads from `instruct-contexts` "
-                                + "and `chat` loads from `characters`. "
-                                + "See README.md for details."))
-                        self.generation_mode_radio = gr.Radio(
-                            ["chat", "instruct"],
-                            label="Generation Mode")
-                    with gr.Column():
-                        self.refresh_characters_button = gr.Button(
-                            value="Refresh Characters",
-                            elem_id="refresh-characters")
-                        self.character_dropdown = gr.Dropdown(
-                            label="Character")
+                    self.character_dropdown_note = gr.Markdown(
+                        value=(
+                            "**Note**: `instruct` and `chat` load from "
+                            + "different source folders. "
+                            + "`instruct` loads from `instruct-contexts` "
+                            + "and `chat` loads from `characters`. "
+                            + "See README.md for details."))
+                with gr.Row():
+                    self.generation_mode_radio = gr.Radio(
+                        ["chat", "instruct"],
+                        label="Generation Mode")
+                    self.refresh_characters_button = gr.Button(
+                        value="Refresh Characters/Templates",
+                        elem_id="refresh-characters")
+                with gr.Row():
+                    self.character_dropdown = gr.Dropdown(
+                        label="Character")
+                    self.instruction_template_dropdown = gr.Dropdown(
+                        label="Insruction Template",
+                        visible=False)
                 with gr.Row():
                     with gr.Column():
                         # Param controls
@@ -227,14 +231,23 @@ class Controller:
         # Refresh characters config
         layout.refresh_characters_button.click(
             self.handle_refresh_characters,
-            outputs=layout.character_dropdown)
+            outputs=[layout.character_dropdown,
+                     layout.instruction_template_dropdown])
 
         # Generation mode config
         layout.generation_mode_radio.value = self.settings.mode
         layout.generation_mode_radio.input(
             self.handle_generation_mode_select,
             inputs=layout.generation_mode_radio,
-            outputs=layout.character_dropdown)
+            outputs=[layout.character_dropdown,
+                     layout.instruction_template_dropdown])
+
+        layout.instruction_template_dropdown.choices \
+            = self.load_template_choices()
+        # TODO Add loading from settings
+        layout.instruction_template_dropdown.select(
+            self.handle_instruction_template_select,
+            inputs=layout.instruction_template_dropdown)
 
         for name, control in layout.controls.items():
             # TODO Implement a better way to fetch the values without getattr
@@ -305,16 +318,26 @@ class Controller:
             self.start_worker()
 
     def handle_refresh_characters(self):
-        return self.layout.character_dropdown.update(
-            choices=self.load_character_choices())
+        return [self.layout.character_dropdown.update(
+            choices=self.load_character_choices()),
+            self.layout.instruction_template_dropdown.update(
+            choices=self.load_template_choices())]
 
     def handle_generation_mode_select(self,
                                       mode: str):
         self.discord_bot.mode = mode
         print("Changed generation mode to %s" % mode)
 
-        return self.layout.character_dropdown.update(
-            choices=self.load_character_choices())
+        if mode == "instruct":
+            instruction_template_state = \
+                self.layout.instruction_template_dropdown.update(visible=True)
+        else:
+            instruction_template_state = \
+                self.layout.instruction_template_dropdown.update(visible=False)
+
+        return [self.layout.character_dropdown.update(
+            choices=self.load_character_choices()),
+            instruction_template_state]
 
     def handle_param_change(self, key: str, value: Any):
         """Is called when a param value is changed
@@ -384,10 +407,17 @@ class Controller:
         path = "characters"
         if self.discord_bot.mode == "instruct":
             path = "instruct-contexts"
-        for filepath in Path(path).glob(f"*.yaml"):
+        for filepath in Path(path).glob("*.yaml"):
             characters.append(filepath.stem)
 
         return characters
+
+    def load_template_choices(self):
+        templates = []
+        for filepath in Path("instruction-templates").glob("*.yaml"):
+            templates.append(filepath.stem)
+
+        return templates
 
     def handle_character_select(self, character: str):
         log.info("Selected character: %s", character)
@@ -396,14 +426,22 @@ class Controller:
         if self.discord_bot.mode == "instruct":
             base_path = "instruct-contexts"
         char_path = Path(f"{base_path}/{character}.yaml")
-        if char_path.exists():
-            if self.worker is not None and self.worker.is_running():
-                self.discord_bot.update_character(character)
-            else:
-                self.discord_bot.character = character
-        else:
-            self.discord_bot.character = "None"
+        self.discord_bot.character = "None"
+        if not char_path.exists():
             return
+        if self.worker is not None and self.worker.is_running():
+            self.discord_bot.update_character(character)
+        else:
+            self.discord_bot.character = character
 
         if self.discord_bot.character:
             log.info("Loaded %s successfully!", character)
+
+    def handle_instruction_template_select(self, template: str):
+        log.info("Selected template: %s", template)
+        base_path = "instruction-templates"
+        template_path = Path(f"{base_path}/{template}.yaml")
+        if template_path.exists():
+            print("Path exists!")
+        else:
+            print("Path doesn't exist!")
