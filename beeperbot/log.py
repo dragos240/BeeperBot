@@ -46,8 +46,8 @@ class BeeperLogger:
 
     def error(self,
               msg: str,
-              exc: Optional[Exception] = None,
-              *args):
+              *args,
+              exc: Optional[Exception] = None):
         self.log_buffer.append(
             self.get_formatted(msg, "ERROR", *args))
         self.logger.error(msg, *args, exc_info=exc)
