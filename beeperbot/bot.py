@@ -3,7 +3,6 @@ from pprint import pformat
 from typing import Dict
 import os
 
-
 from discord.app_commands import CommandTree
 from gradio.external_utils import yaml
 
@@ -236,8 +235,9 @@ class DiscordBot(discord.Client):
             async with message.channel.typing():
                 await self.handle_response(message)
         except discord.DiscordException as e:
-            log.error(f"Exception while processing message: {message.clean_content}",
-                      exc=e)
+            log.error(
+                f"Exception while processing message: {message.clean_content}",
+                exc=e)
 
     def get_bot_reply(self, response: Dict) -> str:
         bot_reply = ""
@@ -278,7 +278,8 @@ class DiscordBot(discord.Client):
                        display_name: str,
                        history: Dict) -> Dict:
         base_request = self.params.to_dict()
-        base_request.update({"user_input": "{}: {}".format(display_name, message),
+        base_request.update({"user_input": "{}: {}"
+                             .format(display_name, message),
                              "history": history})
         log.info("Params: %s", yaml.dump(self.params.to_dict(), indent=2))
         if self.mode == "chat":
@@ -359,7 +360,8 @@ class DiscordBot(discord.Client):
                 character_context = yaml.full_load(f.read())["context"]
             request["context"] = character_context
         except OSError:
-            log.error(f"Cannot find character {self.character}! Going with defaults")
+            log.error(
+                f"Cannot find character {self.character}! Going with defaults")
             pass
 
         return request

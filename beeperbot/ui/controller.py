@@ -8,6 +8,7 @@ from ..log import log
 from .layout import Layout
 from .worker import Worker
 
+
 class Controller:
     """Controller for the UI elements
 
