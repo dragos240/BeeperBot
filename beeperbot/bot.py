@@ -1,6 +1,6 @@
 import asyncio
 from pprint import pformat
-from typing import Dict
+from typing import Dict, Optional, Tuple
 import os
 
 from discord.app_commands import CommandTree
@@ -17,6 +17,12 @@ CHAT_ENDPOINT = f"{DEFAULT_BASE_URL}/api/v1/chat"
 
 
 class ChannelContainer:
+    """A channel and its connected history for a bot
+
+    Attributes:
+        channel: The actual channel
+        history: History for that channel
+    """
     channel: discord.TextChannel
     history: Dict
 
@@ -185,6 +191,14 @@ class DiscordBot(discord.Client):
 
         return -1
 
+    def get_character_picture_path(self) -> Optional[Tuple[str, str]]:
+        for _, _, filenames in os.walk("characters"):
+            for filename in filenames:
+                fname_base, fname_ext = filename.split(".")
+                if fname_base == self.character \
+                        and fname_ext in ["webp", "jpg", "jpeg", "png"]:
+                    return (f"{fname_base}.{fname_ext}", fname_ext)
+
     async def update_character_async(self, name: str):
         self.character = name
         if self.character == "None":
@@ -198,6 +212,12 @@ class DiscordBot(discord.Client):
                 if member.id == self.get_id():
                     if member.nick != name:
                         await member.edit(nick=name)
+                        pic_path = self.get_character_picture_path()
+                        if pic_path is not none \
+                                and member.avatar is not None:
+                            await member.avatar.replace(
+                                f"characters/{pic_path[0]}.png",
+                                static_format=pic_path[1])
 
     def update_character(self, name: str):
         asyncio.run_coroutine_threadsafe(
@@ -308,9 +328,7 @@ class DiscordBot(discord.Client):
                 request[name] = Params.defaults[name]
 
         request.update({
-            # 'history': history,
             'mode': 'instruct',
-            'your_name': "",
             'name1_instruct': user_string,  # Optional
             'name2_instruct': bot_string,  # Optional
             'context_instruct': persona,

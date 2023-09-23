@@ -1,7 +1,9 @@
 import logging as log
 
 from .beeperbot.log import log
-from .beeperbot.ui import Layout
+from .beeperbot.settings import Settings
+from .beeperbot.ui.layout import Layout
+from .beeperbot.ui.controller import Controller
 
 SCRIPT_PY_VERSION = "0.1.0"
 
@@ -33,9 +35,9 @@ def ui(launch: bool = False):
         log.error("API extension not enabled, quitting...")
         return
 
-    layout = Layout()
-
-    layout.layout_ui(launch)
+    settings = Settings()
+    layout = Layout(settings)
+    Controller(layout)
 
 
 def custom_css() -> str:
