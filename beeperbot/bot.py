@@ -191,35 +191,44 @@ class DiscordBot(discord.Client):
 
         return -1
 
-    def get_character_picture_path(self) -> Optional[Tuple[str, str]]:
+    def get_character_picture(self) -> Optional[bytes]:
+        """Get the picture for the bot's name
+
+        Returns:
+            Optional[bytes]: The picture data if it exists
+        """
         for _, _, filenames in os.walk("characters"):
             for filename in filenames:
                 fname_base, fname_ext = filename.split(".")
                 if fname_base == self.character \
                         and fname_ext in ["webp", "jpg", "jpeg", "png"]:
-                    return (f"{fname_base}.{fname_ext}", fname_ext)
+                    pic_path = f"characters/{filename}"
+                    with open(pic_path, "rb") as f:
+                        return f.read()
 
     async def update_character_async(self, name: str):
+        """Update the bot's name and picture (if a match exists)
+
+        Args:
+            name (str): The new name
+        """
         self.character = name
         if self.character == "None":
             return
-        for channel_name, channel_container in self.active_channels.items():
-            if not self.is_channel_allowed(channel_name):
-                continue
-            channel = channel_container.channel
-            members = channel.guild.members
-            for member in members:
-                if member.id == self.get_id():
-                    if member.nick != name:
-                        await member.edit(nick=name)
-                        pic_path = self.get_character_picture_path()
-                        if pic_path is not none \
-                                and member.avatar is not None:
-                            await member.avatar.replace(
-                                f"characters/{pic_path[0]}.png",
-                                static_format=pic_path[1])
+        if self.user is None:
+            return
+        await self.user.edit(username=name)
+        pic = self.get_character_picture()
+        if pic is None:
+            return
+        await self.user.edit(avatar=pic)
 
     def update_character(self, name: str):
+        """Calls update_character_async in the event loop
+
+        Args:
+            name (str): The new name
+        """
         asyncio.run_coroutine_threadsafe(
             self.update_character_async(name),
             self.loop)
