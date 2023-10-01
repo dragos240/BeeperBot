@@ -64,14 +64,6 @@ class Layout:
                     self.bot_on_toggle = gr.Button(
                         value="Toggle Start/Stop")
                 with gr.Row():
-                    self.character_dropdown_note = gr.Markdown(
-                        value=(
-                            "**Note**: `instruct` and `chat` load from "
-                            + "different source folders. "
-                            + "`instruct` loads from `instruct-contexts` "
-                            + "and `chat` loads from `characters`. "
-                            + "See README.md for details."))
-                with gr.Row():
                     self.generation_mode_radio = gr.Radio(
                         ["chat", "instruct"],
                         label="Generation Mode")

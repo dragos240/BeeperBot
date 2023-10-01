@@ -1,6 +1,9 @@
 from pathlib import Path
 from typing import Any, Optional
+import os.path
+
 import gradio as gr
+from gradio.external_utils import yaml
 
 from ..bot import DiscordBot
 from ..settings import Settings
@@ -51,6 +54,10 @@ class Controller:
             outputs=[layout.character_dropdown,
                      layout.instruction_template_dropdown])
 
+        if layout.settings.mode == "instruct":
+            layout.instruction_template_dropdown.visible = True
+            layout.instruction_template_dropdown.value \
+                = self.settings.instruction_template
         layout.instruction_template_dropdown.choices \
             = self.load_template_choices()
         # TODO Add loading from settings
@@ -194,6 +201,9 @@ class Controller:
 
         settings.mode = self.discord_bot.mode
         settings.character = self.discord_bot.character
+        if self.discord_bot.instruction_template:
+            settings.instruction_template \
+                = self.discord_bot.instruction_template
         settings.params = self.discord_bot.params
         settings.starting_channel = self.discord_bot.starting_channel
         settings.channel_whitelist = self.discord_bot.channel_whitelist
@@ -220,8 +230,6 @@ class Controller:
     def load_character_choices(self):
         characters = []
         path = "characters"
-        if self.discord_bot.mode == "instruct":
-            path = "instruct-contexts"
         for filepath in Path(path).glob("*.yaml"):
             characters.append(filepath.stem)
 
@@ -237,10 +245,7 @@ class Controller:
     def handle_character_select(self, character: str):
         log.info("Selected character: %s", character)
 
-        base_path = "characters"
-        if self.discord_bot.mode == "instruct":
-            base_path = "instruct-contexts"
-        char_path = Path(f"{base_path}/{character}.yaml")
+        char_path = Path(f"characters/{character}.yaml")
         self.discord_bot.character = "None"
         if not char_path.exists():
             return
@@ -255,8 +260,9 @@ class Controller:
     def handle_instruction_template_select(self, template: str):
         log.info("Selected template: %s", template)
         base_path = "instruction-templates"
-        template_path = Path(f"{base_path}/{template}.yaml")
-        if template_path.exists():
-            print("Path exists!")
-        else:
-            print("Path doesn't exist!")
+        template_path = f"{base_path}/{template}.yaml"
+        if not os.path.exists(template_path):
+            return
+        self.discord_bot.instruction_template = template
+
+        log.info("Loaded %s successfully!", template_path)

@@ -56,6 +56,7 @@ class Params:
 
 class Settings:
     character: str
+    instruction_template: str
     mode: str
     starting_channel: str
     channel_blacklist: str
@@ -66,6 +67,7 @@ class Settings:
         self.data = {
             "mode": "chat",
             "character": "None",
+            "instruction_template": "",
             "starting_channel": "",
             "channel_blacklist": "",
             "channel_whitelist": "",
@@ -77,6 +79,7 @@ class Settings:
         return {
             "mode": self.mode,
             "character": self.character,
+            "instruction_template": self.instruction_template,
             "starting_channel": self.starting_channel,
             "channel_blacklist": self.channel_blacklist,
             "channel_whitelist": self.channel_whitelist,
@@ -95,6 +98,7 @@ class Settings:
             pass
         self.mode = self.data["mode"]
         self.character = self.data["character"]
+        self.instruction_template = self.data["instruction_template"]
         self.starting_channel = self.data["starting_channel"]
         self.channel_blacklist = self.data["channel_blacklist"]
         self.channel_whitelist = self.data["channel_whitelist"]
