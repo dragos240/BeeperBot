@@ -1,23 +1,27 @@
 import asyncio
-import logging as log
 from pprint import pformat
-from typing import Dict, List, Tuple
+from typing import Dict, Optional
 import os
 
-
+import discord
 from discord.app_commands import CommandTree
 from gradio.external_utils import yaml
-
 import requests
-import discord
 
 from .settings import Settings, Params
+from .log import log
 
 DEFAULT_BASE_URL = "http://localhost:5000"
 CHAT_ENDPOINT = f"{DEFAULT_BASE_URL}/api/v1/chat"
 
 
 class ChannelContainer:
+    """A channel and its connected history for a bot
+
+    Attributes:
+        channel: The actual channel
+        history: History for that channel
+    """
     channel: discord.TextChannel
     history: Dict
 
@@ -33,6 +37,7 @@ class DiscordBot(discord.Client):
     """Discord bot the UI uses"""
 
     character: str
+    instruction_template: str
     channel_whitelist: str
     channel_blacklist: str
     do_greeting: bool
@@ -43,6 +48,7 @@ class DiscordBot(discord.Client):
 
     def __init__(self, settings: Settings):
         self.character = settings.character
+        self.instruction_template = settings.instruction_template
         self.starting_channel = settings.starting_channel
         self.channel_whitelist = settings.channel_whitelist
         self.channel_blacklist = settings.channel_blacklist
@@ -101,6 +107,8 @@ class DiscordBot(discord.Client):
         for channel_container in self.active_channels.values():
             await channel_container.channel.send("Signing off...")
 
+    # Commands
+
     @discord.app_commands.describe(
         message="Message to repeat"
     )
@@ -109,16 +117,20 @@ class DiscordBot(discord.Client):
 
     async def reset(self, interaction: discord.Interaction):
         channel = interaction.channel
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             return
         channel_container = ChannelContainer(channel)
         request = self.create_request("Say hi~",
                                       "Chat",
                                       channel_container.history)
+        if channel.name is None:
+            return
         self.active_channels[channel.name] = channel_container
         bot_reply = self.get_bot_reply(self.poll_api(request))
 
         await interaction.response.send_message(bot_reply)
+
+    # Discord.py events
 
     async def on_ready(self):
         log.info("Connected to discord!")
@@ -129,7 +141,42 @@ class DiscordBot(discord.Client):
             await self.greet()
             self.do_greeting = False
 
+    async def on_message(self, message: discord.Message):
+        # Make sure message is in a TextChannel
+        if not isinstance(message.channel, discord.TextChannel):
+            return
+        # Add channel to active_channels if we're mentioned and the channel
+        # is not already in active_channels and not in the blacklist
+        if (not self.is_active_channel(message.channel)
+            and self.is_name_in_message(message)
+                and self.is_channel_allowed(message.channel.name)):
+            self.active_channels[message.channel.name] \
+                = ChannelContainer(message.channel)
+            log.info("I was pinged in %s. I can now talk there!",
+                     message.channel.name)
+        # Return if message starts with ignore string, or it's something
+        # we already posted, or if it's not in active_channels
+        if (message.author.id == self.id
+            or message.clean_content.startswith("//")
+                or not self.is_active_channel(message.channel)):
+            return
+
+        # Update nicks
+        await self.update_character_async(self.character)
+
+        # Send a response
+        try:
+            async with message.channel.typing():
+                await self.handle_response(message)
+        except discord.DiscordException as e:
+            log.error(
+                f"Exception while processing message: {message.clean_content}",
+                exc=e)
+
+    # Other methods
+
     async def greet(self):
+        """Send a greeting message to the starting channel if it exists"""
         if not self.starting_channel:
             return
         channel = self.get_greeting_channel()
@@ -142,33 +189,19 @@ class DiscordBot(discord.Client):
 
         await channel.send(bot_greeting)
 
-    def get_bot_names(self, channel: discord.TextChannel):
-        names = [self.character.lower()]
+    @property
+    def id(self) -> int:
         if self.user is not None:
-            names.append(self.user.display_name.lower())
-            for member in channel.members:
-                if member.id == self.get_id():
-                    names.append(member.nick)
-                    break
+            return self.user.id
 
-        return names
-
-    def get_name_with_message(self, message: discord.Message):
-        names = self.get_bot_names(message.channel)
-        result = self.character
-
-        for name in names:
-            if name in message.clean_content.lower():
-                result = name
-
-        return result
+        return -1
 
     def is_name_in_message(self, message: discord.Message) -> bool:
-        names = self.get_bot_names(message.channel)
+        if not isinstance(message.channel, discord.TextChannel):
+            return False
 
-        for name in names:
-            if name in message.clean_content.lower():
-                return True
+        if self.character in message.clean_content.lower():
+            return True
 
         return False
 
@@ -178,21 +211,44 @@ class DiscordBot(discord.Client):
 
         return -1
 
+    def get_character_picture(self) -> Optional[bytes]:
+        """Get the picture for the bot's name
+
+        Returns:
+            Optional[bytes]: The picture data if it exists
+        """
+        for _, _, filenames in os.walk("characters"):
+            for filename in filenames:
+                fname_base, fname_ext = filename.split(".")
+                if fname_base == self.character \
+                        and fname_ext in ["webp", "jpg", "jpeg", "png"]:
+                    pic_path = f"characters/{filename}"
+                    with open(pic_path, "rb") as f:
+                        return f.read()
+
     async def update_character_async(self, name: str):
+        """Update the bot's name and picture (if a match exists)
+
+        Args:
+            name (str): The new name
+        """
         self.character = name
         if self.character == "None":
             return
-        for channel_name, channel_container in self.active_channels.items():
-            if not self.is_channel_allowed(channel_name):
-                continue
-            channel = channel_container.channel
-            members = channel.guild.members
-            for member in members:
-                if member.id == self.get_id():
-                    if member.nick != name:
-                        await member.edit(nick=name)
+        if self.user is None:
+            return
+        await self.user.edit(username=name)
+        pic = self.get_character_picture()
+        if pic is None:
+            return
+        await self.user.edit(avatar=pic)
 
     def update_character(self, name: str):
+        """Calls update_character_async in the event loop
+
+        Args:
+            name (str): The new name
+        """
         asyncio.run_coroutine_threadsafe(
             self.update_character_async(name),
             self.loop)
@@ -205,31 +261,6 @@ class DiscordBot(discord.Client):
 
         return False
 
-    async def on_message(self, message: discord.Message):
-        if (not self.is_active_channel(message.channel)
-            and self.is_name_in_message(message)
-                and self.is_channel_allowed(message.channel.name)):
-            self.active_channels[message.channel.name] \
-                = ChannelContainer(message.channel)
-            log.info("I was pinged in %s. I can now talk there!",
-                     message.channel.name)
-        if (self.user is not None
-            and message.author.id == self.user.id
-            or message.clean_content.startswith("//")
-                or not self.is_active_channel(message.channel)):
-            return
-
-        # Update nicks
-        await self.update_character_async(self.character)
-
-        try:
-            async with message.channel.typing():
-                await self.handle_response(message)
-        except discord.DiscordException as e:
-            log.error("Exception while processing message: %s",
-                      message.clean_content,
-                      exc_info=e)
-
     def get_bot_reply(self, response: Dict) -> str:
         bot_reply = ""
         if "internal" in response:
@@ -237,7 +268,44 @@ class DiscordBot(discord.Client):
 
         return bot_reply
 
+    def get_greeting_channel(self) -> discord.TextChannel:
+        starting_channel = self.starting_channel
+        for guild in self.guilds:
+            for channel in guild.channels:
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+                if channel.name == starting_channel:
+                    return channel
+
+        raise Exception("Could not get greeting channel")
+
+    def sanitize_context(self,
+                         name: str,
+                         context: str) -> str:
+        # Remove any unicode characters that may mess with parsing
+        context = context.encode("ascii", "ignore").decode()
+        # Replace placeholders and newlines
+        context = (context
+            .replace("{{user}}'s", "your")
+            .replace("{{user}}", "you")
+            .replace("{{char}}", name)
+            .replace("\\n", " ")
+            )
+
+        return context
+
+
+    def sanitize_turn_template(self,
+                               name: str,
+                               turn_template: str):
+        return turn_template.replace("<|bot-message|>",
+                                     f"{name}: <|bot-message|>")
+
+    # Ooba API related methods
+
     async def handle_response(self, message: discord.Message):
+        if not isinstance(message.channel, discord.TextChannel):
+            return
         channel_container = self.active_channels[message.channel.name]
         request = self.create_request(
             message.clean_content,
@@ -245,47 +313,44 @@ class DiscordBot(discord.Client):
             channel_container.history)
         response = self.poll_api(request)
 
-        log.info("Params: %s", pformat(self.params))
+        log.info("Params: %s", pformat(self.params.to_dict()))
 
         bot_reply = self.get_bot_reply(response)
         await message.reply(bot_reply, mention_author=False)
         channel_container.history.update(response)
 
-    def get_greeting_channel(self) -> discord.TextChannel:
-        starting_channel = self.starting_channel
-        for guild in self.guilds:
-            channel: discord.TextChannel
-            for channel in guild.channels:
-                if channel.name == starting_channel:
-                    return channel
-
     def create_request(self,
                        message: str,
                        display_name: str,
-                       history: Dict):
+                       history: Dict) -> Dict:
         base_request = self.params.to_dict()
-        base_request.update({"user_input": "{}: {}".format(display_name, message),
+        base_request.update({"user_input": "{}: {}"
+                             .format(display_name, message),
                              "history": history})
         log.info("Params: %s", yaml.dump(self.params.to_dict(), indent=2))
         if self.mode == "chat":
             return self.create_chat_request(base_request)
-        elif self.mode == "instruct":
+        else:
             return self.create_instruct_request(base_request)
 
     def create_instruct_request(self,
                                 base_request: Dict):
         request = base_request
 
-        instruct_data = {}
-        os.makedirs("instruct-contexts", exist_ok=True)
-        with open(f"instruct-contexts/{self.character}.yaml", "r") as f:
-            instruct_data = yaml.full_load(f.read())
-        user_string = instruct_data["user_string"]
-        bot_string = instruct_data["bot_string"]
-        persona = instruct_data["context"] \
-            .replace("USER ", user_string) \
-            .replace("BOT ", bot_string)
-        turn_template = instruct_data["turn_template"]
+        character = {}
+        with open(f"characters/{self.character}.yaml", "r") as f:
+            character = yaml.full_load(f.read())
+        name = character.get("name", self.character)
+        instruction_template = {}
+        with open(f"instruction-templates/{self.instruction_template}.yaml",
+                  "r") as f:
+            instruction_template = yaml.full_load(f.read())
+        user_string = instruction_template["user"]
+        bot_string = instruction_template["bot"]
+        turn_template = self.sanitize_turn_template(
+            name,
+            instruction_template["turn_template"])
+        persona = self.sanitize_context(name, character["context"])
 
         # Prevent None values from going into the request
         for name, value in request.items():
@@ -293,23 +358,11 @@ class DiscordBot(discord.Client):
                 request[name] = Params.defaults[name]
 
         request.update({
-            # 'history': history,
             'mode': 'instruct',
-            'your_name': "",
             'name1_instruct': user_string,  # Optional
             'name2_instruct': bot_string,  # Optional
             'context_instruct': persona,
             'turn_template': turn_template,
-            'regenerate': False,
-            '_continue': False,
-            'do_sample': True,
-
-            'seed': -1,
-            'add_bos_token': True,
-            'truncation_length': 2048,
-            'ban_eos_token': False,
-            'skip_special_tokens': True,
-            'stopping_strings': []
         })
 
         return request
@@ -324,20 +377,9 @@ class DiscordBot(discord.Client):
                 request[name] = Params.defaults[name]
 
         request.update({
-            # 'history': history,
             'mode': 'chat',
             'your_name': "",
             'name2': self.character,
-            'regenerate': False,
-            '_continue': False,
-            'do_sample': True,
-
-            'seed': -1,
-            'add_bos_token': True,
-            'truncation_length': 2048,
-            'ban_eos_token': False,
-            'skip_special_tokens': True,
-            'stopping_strings': []
         })
 
         try:
@@ -345,8 +387,8 @@ class DiscordBot(discord.Client):
                 character_context = yaml.full_load(f.read())["context"]
             request["context"] = character_context
         except OSError:
-            log.error("Cannot find character %s! Going with defaults",
-                      self.character)
+            log.error(
+                f"Cannot find character {self.character}! Going with defaults")
             pass
 
         return request
@@ -355,7 +397,7 @@ class DiscordBot(discord.Client):
         response = requests.post(CHAT_ENDPOINT, json=request)
 
         if response.status_code != 200:
-            log.warning(f"Status code came back as {response.status_code}")
+            log.warn(f"Status code came back as {response.status_code}")
 
             return {}
 

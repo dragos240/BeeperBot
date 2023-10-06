@@ -32,13 +32,5 @@ I suggest keeping the console window you're using for running text-generation-we
 ## Character config
 
 The list of characters are populated from different sources depending on the generation mode used:
-- `chat` uses the built in `characters` folder to grab characters from. This needs no modification to work
-- `instruct` uses a custom folder called `instruct-contexts` and a custom configuration YAML file
-
-### Required params for `instruct` characters
-- `user_string` is the string that's prepended before a user's dialogue. You will want to use the one for the model you've selected (Look up your model if you aren't sure). Alpaca based models use `### Instruction:\n` for example
-- `bot_string` is the string that's prepended before a user's dialogue. Again, use the corresponding one to your model. Alpaca based models use `### Response:\n`
-- `turn_template` defines the format in history of an interaction. If you aren't sure, look at the "Intstruction template" section in the main "Parameters" or "Character" tabs depending on your version of text-generation-webui. Alpaca models use the following template: `<|user|>\n<|user-message|>\n\n<|bot|>\n<|bot-message|>\n\n`
-- `context` is where you'd put the context for a character in the main "Characters" section. `USER` is replaced with `user_string` and likewise with `BOT` and `bot_string` (this is mainly for convenience so you more easily modify the config for other models and for testing)
-
-An example config file can be found [here](instruct-example-character.yaml)
+- `chat` uses the built in `characters` folder to grab characters from and needs no additional configuration
+- `instruct` also uses the same `characters` folder but requires you select an appropriate instruction template for your specified moder

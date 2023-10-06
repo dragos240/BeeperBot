@@ -1,4 +1,5 @@
-from typing import Any, List, Dict
+from pprint import pformat
+from typing import Any, Dict
 
 import yaml
 
@@ -39,6 +40,9 @@ class Params:
             "top_p": self.top_p,
         }
 
+    def __str__(self) -> str:
+        return pformat(self.to_dict())
+
     @classmethod
     def from_defaults(cls):
         """Sets values to defaults"""
@@ -52,6 +56,7 @@ class Params:
 
 class Settings:
     character: str
+    instruction_template: str
     mode: str
     starting_channel: str
     channel_blacklist: str
@@ -59,12 +64,22 @@ class Settings:
     params: Params
 
     def __init__(self):
+        self.data = {
+            "mode": "chat",
+            "character": "None",
+            "instruction_template": "",
+            "starting_channel": "",
+            "channel_blacklist": "",
+            "channel_whitelist": "",
+            "params": Params.defaults,
+        }
         self.load_from_file()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "mode": self.mode,
             "character": self.character,
+            "instruction_template": self.instruction_template,
             "starting_channel": self.starting_channel,
             "channel_blacklist": self.channel_blacklist,
             "channel_whitelist": self.channel_whitelist,
@@ -76,25 +91,18 @@ class Settings:
             f.write(yaml.dump(self.to_dict()))
 
     def load_from_file(self):
-        data = {
-            "mode": "chat",
-            "character": "None",
-            "starting_channel": "",
-            "channel_blacklist": "",
-            "channel_whitelist": "",
-            "params": {},
-        }
         try:
             with open(SETTINGS_PATH, "r") as f:
-                data.update(yaml.full_load(f.read()))
+                self.data.update(yaml.full_load(f.read()))
         except OSError:
             pass
-        self.mode = data["mode"]
-        self.character = data["character"]
-        self.starting_channel = data["starting_channel"]
-        self.channel_blacklist = data["channel_blacklist"]
-        self.channel_whitelist = data["channel_whitelist"]
-        params = data["params"]
+        self.mode = self.data["mode"]
+        self.character = self.data["character"]
+        self.instruction_template = self.data["instruction_template"]
+        self.starting_channel = self.data["starting_channel"]
+        self.channel_blacklist = self.data["channel_blacklist"]
+        self.channel_whitelist = self.data["channel_whitelist"]
+        params = self.data["params"]
         self.params = Params.from_defaults()
         if not params:
             self.params = Params(**params)
