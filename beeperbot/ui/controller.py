@@ -35,7 +35,7 @@ class Controller:
 
         # Character dropdown config
         layout.character_dropdown.choices = self.load_character_choices()
-        layout.character_dropdown.value = self.settings.character
+        layout.character_dropdown.value = self.load_last_character()
         layout.character_dropdown.select(
             self.handle_character_select,
             inputs=layout.character_dropdown)
@@ -138,6 +138,9 @@ class Controller:
             self.worker.stop()
         else:
             self.start_worker()
+
+    def load_last_character(self):
+        return self.settings.character_path.split("/")[-1].split(".")[0]
 
     def handle_refresh_characters(self):
         return [self.layout.character_dropdown.update(
