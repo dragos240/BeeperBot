@@ -56,6 +56,7 @@ class Params:
 
 class Settings:
     character: str
+    character_path: str
     instruction_template: str
     mode: str
     starting_channel: str
@@ -67,6 +68,7 @@ class Settings:
         self.data = {
             "mode": "chat",
             "character": "None",
+            "character_path": "",
             "instruction_template": "",
             "starting_channel": "",
             "channel_blacklist": "",
@@ -79,6 +81,7 @@ class Settings:
         return {
             "mode": self.mode,
             "character": self.character,
+            "character_path": self.character_path,
             "instruction_template": self.instruction_template,
             "starting_channel": self.starting_channel,
             "channel_blacklist": self.channel_blacklist,
@@ -96,13 +99,16 @@ class Settings:
                 self.data.update(yaml.full_load(f.read()))
         except OSError:
             pass
-        self.mode = self.data["mode"]
-        self.character = self.data["character"]
-        self.instruction_template = self.data["instruction_template"]
-        self.starting_channel = self.data["starting_channel"]
-        self.channel_blacklist = self.data["channel_blacklist"]
-        self.channel_whitelist = self.data["channel_whitelist"]
-        params = self.data["params"]
+        self.mode = self.data.get("mode")
+        self.character = self.data.get("character")
+        self.character_path = self.data.get("character_path")
+        if not self.character_path:
+            self.character_path = f"characters/{self.character}.yaml"
+        self.instruction_template = self.data.get("instruction_template")
+        self.starting_channel = self.data.get("starting_channel")
+        self.channel_blacklist = self.data.get("channel_blacklist")
+        self.channel_whitelist = self.data.get("channel_whitelist")
+        params = self.data.get("params")
         self.params = Params.from_defaults()
-        if not params:
+        if params is not None:
             self.params = Params(**params)
