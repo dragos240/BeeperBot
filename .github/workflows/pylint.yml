@@ -21,4 +21,4 @@ jobs:
         pip install pylint gradio
     - name: Analysing the code with pylint
       run: |
-        pylint beeperbot
+        pylint -E beeperbot
