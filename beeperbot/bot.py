@@ -5,6 +5,7 @@ import os
 
 import discord
 from discord.app_commands import CommandTree
+from discord.errors import HTTPException
 from gradio.external_utils import yaml
 import requests
 
@@ -37,6 +38,7 @@ class DiscordBot(discord.Client):
     """Discord bot the UI uses"""
 
     character: str
+    character_path: str
     instruction_template: str
     channel_whitelist: str
     channel_blacklist: str
@@ -48,6 +50,7 @@ class DiscordBot(discord.Client):
 
     def __init__(self, settings: Settings):
         self.character = settings.character
+        self.character_path = settings.character_path
         self.instruction_template = settings.instruction_template
         self.starting_channel = settings.starting_channel
         self.channel_whitelist = settings.channel_whitelist
@@ -161,8 +164,10 @@ class DiscordBot(discord.Client):
                 or not self.is_active_channel(message.channel)):
             return
 
-        # Update nicks
-        await self.update_character_async(self.character)
+        # Update nicks if necessary
+        if self.character_path \
+                and self.current_name != self.character:
+            await self.update_character_async(self.character_path)
 
         # Send a response
         try:
@@ -196,6 +201,13 @@ class DiscordBot(discord.Client):
 
         return -1
 
+    @property
+    def current_name(self) -> str:
+        if self.user is not None:
+            return self.user.name
+
+        return ""
+
     def is_name_in_message(self, message: discord.Message) -> bool:
         if not isinstance(message.channel, discord.TextChannel):
             return False
@@ -205,43 +217,55 @@ class DiscordBot(discord.Client):
 
         return False
 
-    def get_id(self) -> int:
-        if self.user is not None:
-            return self.user.id
-
-        return -1
-
     def get_character_picture(self) -> Optional[bytes]:
         """Get the picture for the bot's name
 
         Returns:
             Optional[bytes]: The picture data if it exists
         """
+        base_filename = self.character_path\
+            .split("/")[-1] \
+            .split(".")[0]
         for _, _, filenames in os.walk("characters"):
             for filename in filenames:
                 fname_base, fname_ext = filename.split(".")
-                if fname_base == self.character \
+                if fname_base == base_filename \
                         and fname_ext in ["webp", "jpg", "jpeg", "png"]:
                     pic_path = f"characters/{filename}"
                     with open(pic_path, "rb") as f:
                         return f.read()
 
-    async def update_character_async(self, name: str):
+    async def update_character_async(self, char_path: str):
         """Update the bot's name and picture (if a match exists)
 
         Args:
-            name (str): The new name
+            char_path (str): The path to the character file
         """
-        self.character = name
-        if self.character == "None":
-            return
-        if self.user is None:
-            return
-        await self.user.edit(username=name)
-        pic = self.get_character_picture()
-        if pic is None:
-            return
-        await self.user.edit(avatar=pic)
+        self.character_path = char_path
+        with open(self.character_path) as f:
+            character = yaml.full_load(f.read())
+        name = character["name"]
+        # Don't set the character name if it's already set correctly
+        if self.character != name:
+            self.character = name
+
+        if self.user is not None:
+            if self.current_name != self.character:
+                # Try to change username if it doesn't match character name
+                log.info(f"Changing username to {self.character}")
+                try:
+                    await self.user.edit(username=self.character)
+                except HTTPException:
+                    log.error("Couldn't change username, too many requests")
+
+            pic = self.get_character_picture()
+            if pic is None:
+                return
+            log.info("Changing avatar")
+            try:
+                await self.user.edit(avatar=pic)
+            except HTTPException:
+                log.error("Couldn't change avatar, too many requests")
 
     def update_character(self, name: str):
         """Calls update_character_async in the event loop
@@ -338,7 +362,7 @@ class DiscordBot(discord.Client):
         request = base_request
 
         character = {}
-        with open(f"characters/{self.character}.yaml", "r") as f:
+        with open(self.character_path, "r") as f:
             character = yaml.full_load(f.read())
         name = character.get("name", self.character)
         instruction_template = {}
@@ -383,7 +407,7 @@ class DiscordBot(discord.Client):
         })
 
         try:
-            with open(f"characters/{self.character}.yaml") as f:
+            with open(self.character_path) as f:
                 character_context = yaml.full_load(f.read())["context"]
             request["context"] = character_context
         except OSError:

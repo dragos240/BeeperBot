@@ -35,7 +35,7 @@ class Controller:
 
         # Character dropdown config
         layout.character_dropdown.choices = self.load_character_choices()
-        layout.character_dropdown.value = self.settings.character
+        layout.character_dropdown.value = self.load_last_character()
         layout.character_dropdown.select(
             self.handle_character_select,
             inputs=layout.character_dropdown)
@@ -138,6 +138,9 @@ class Controller:
             self.worker.stop()
         else:
             self.start_worker()
+
+    def load_last_character(self):
+        return self.settings.character_path.split("/")[-1].split(".")[0]
 
     def handle_refresh_characters(self):
         return [self.layout.character_dropdown.update(
@@ -245,17 +248,16 @@ class Controller:
     def handle_character_select(self, character: str):
         log.info("Selected character: %s", character)
 
-        char_path = Path(f"characters/{character}.yaml")
+        char_path = f"characters/{character}.yaml"
         self.discord_bot.character = "None"
-        if not char_path.exists():
+        if not os.path.exists(char_path):
             return
         if self.worker is not None and self.worker.is_running():
-            self.discord_bot.update_character(character)
+            self.discord_bot.update_character(char_path)
         else:
-            self.discord_bot.character = character
+            self.discord_bot.character_path = char_path
 
-        if self.discord_bot.character:
-            log.info("Loaded %s successfully!", character)
+        log.info("Loaded %s successfully!", character)
 
     def handle_instruction_template_select(self, template: str):
         log.info("Selected template: %s", template)
